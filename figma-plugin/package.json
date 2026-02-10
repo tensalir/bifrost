@@ -1,0 +1,13 @@
+{
+  "name": "bifrost-figma-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.102.0",
+    "typescript": "^5.7.2"
+  }
+}

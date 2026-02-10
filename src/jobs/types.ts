@@ -1,0 +1,39 @@
+/**
+ * Job and sync record types for idempotency and audit.
+ */
+
+export type PendingSyncJobState = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface PendingSyncJob {
+  id: string
+  /** Idempotency: monday:itemId:statusTransitionId */
+  idempotencyKey: string
+  mondayItemId: string
+  mondayBoardId: string
+  batchCanonical: string
+  figmaFileKey: string | null
+  expectedFileName: string
+  /** Experiment page name for Figma */
+  experimentPageName: string
+  /** Briefing payload for template fill */
+  briefingPayload: unknown
+  state: PendingSyncJobState
+  createdAt: string
+  updatedAt: string
+  /** Set when completed via plugin */
+  figmaPageId?: string | null
+  figmaFileUrl?: string | null
+  errorCode?: string | null
+}
+
+export interface SyncRecord {
+  mondayItemId: string
+  mondayBoardId: string
+  batchCanonical: string
+  figmaFileKey: string | null
+  figmaPageId: string | null
+  jobState: PendingSyncJobState
+  lastRunAt: string
+  errorCode: string | null
+  idempotencyKey: string
+}

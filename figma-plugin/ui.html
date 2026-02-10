@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Inter, sans-serif; padding: 12px; margin: 0; }
+    h3 { margin: 0 0 8px 0; font-size: 12px; }
+    button { padding: 8px 16px; background: #0d99ff; color: white; border: none; border-radius: 6px; cursor: pointer; width: 100%; }
+    button:hover { background: #0b85e0; }
+    #msg { font-size: 11px; color: #666; margin-top: 8px; }
+    .err { color: #f24822; }
+  </style>
+</head>
+<body>
+  <h3>Bifrost Sync</h3>
+  <p id="msg">Sync queued briefings from Monday into this file.</p>
+  <button id="sync">Sync queued briefings</button>
+  <script>
+    document.getElementById('sync').onclick = () => {
+      parent.postMessage({ pluginMessage: 'sync' }, '*');
+      document.getElementById('msg').textContent = 'Syncing…';
+      document.getElementById('msg').className = '';
+    };
+    onmessage = (e) => {
+      const d = e.data;
+      const el = document.getElementById('msg');
+      if (d.type === 'result') {
+        el.textContent = `Done: ${d.done} page(s). ${d.failed?.length ? 'Failed: ' + d.failed.join(', ') : ''}`;
+        el.className = d.failed?.length ? 'err' : '';
+      } else if (d.type === 'error') {
+        el.textContent = d.message || 'Error';
+        el.className = 'err';
+      }
+    };
+  </script>
+</body>
+</html>
