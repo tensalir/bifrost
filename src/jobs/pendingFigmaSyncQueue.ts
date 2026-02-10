@@ -10,7 +10,9 @@ export type { PendingSyncJob, PendingSyncJobState }
 
 const store = new Map<string, PendingSyncJob>()
 
-export function enqueuePendingSyncJob(job: Omit<PendingSyncJob, 'id' | 'state' | 'createdAt' | 'updatedAt'>): PendingSyncJob {
+export function enqueuePendingSyncJob(
+  job: Omit<PendingSyncJob, 'id' | 'state' | 'createdAt' | 'updatedAt'>
+): PendingSyncJob {
   const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const now = new Date().toISOString()
   const full: PendingSyncJob = {
@@ -22,6 +24,10 @@ export function enqueuePendingSyncJob(job: Omit<PendingSyncJob, 'id' | 'state' |
   }
   store.set(job.idempotencyKey, full)
   return full
+}
+
+export function getAllPendingJobs(): PendingSyncJob[] {
+  return [...store.values()].filter((j) => j.state === 'queued')
 }
 
 export function getPendingJobsByFileKey(figmaFileKey: string): PendingSyncJob[] {

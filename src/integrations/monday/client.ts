@@ -37,6 +37,7 @@ export async function mondayGraphql<T = unknown>(
     headers: {
       'Content-Type': 'application/json',
       Authorization: token,
+      'API-Version': '2025-04',
     },
     body: JSON.stringify({ query, variables }),
   })
@@ -51,7 +52,8 @@ export function columnMap(item: MondayItem): Record<string, string | number | nu
   const out: Record<string, string | number | null> = {}
   for (const col of item.column_values ?? []) {
     const key = col.title ? col.title.toLowerCase().replace(/\s+/g, '_') : col.id
-    if (col.text != null) out[key] = col.text
+    const text = col.text != null ? String(col.text).trim() : ''
+    if (text !== '') out[key] = text
     else if (col.value != null) {
       try {
         const parsed = JSON.parse(col.value)

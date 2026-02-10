@@ -5,6 +5,7 @@
 import { createServer } from 'node:http'
 import { handleMondayWebhook } from './webhooks/monday.js'
 import {
+  getAllPendingJobs,
   getPendingJobsByFileKey,
   getPendingJobsByBatchCanonical,
   markJobCompleted,
@@ -23,7 +24,12 @@ async function parseJsonBody(req: import('node:http').IncomingMessage): Promise<
 }
 
 function send(res: import('node:http').ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  })
   res.end(JSON.stringify(data))
 }
 
@@ -31,6 +37,17 @@ const server = createServer(async (req, res) => {
   const url = req.url ?? '/'
   const method = req.method ?? 'GET'
   const [path, qs] = url.split('?')
+
+  // Handle CORS preflight
+  if (method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    })
+    res.end()
+    return
+  }
 
   if (path === '/health') {
     send(res, 200, { ok: true })
@@ -52,13 +69,11 @@ const server = createServer(async (req, res) => {
     const params = new URLSearchParams(qs ?? '')
     const fileKey = params.get('fileKey') ?? params.get('file_key')
     const batch = params.get('batchCanonical') ?? params.get('batch')
-    if (!fileKey && !batch) {
-      send(res, 400, { error: 'fileKey or batchCanonical required' })
-      return
-    }
     const jobs = fileKey
       ? getPendingJobsByFileKey(fileKey)
-      : getPendingJobsByBatchCanonical(batch!)
+      : batch
+        ? getPendingJobsByBatchCanonical(batch)
+        : getAllPendingJobs()
     send(res, 200, { jobs })
     return
   }
@@ -95,7 +110,8 @@ const server = createServer(async (req, res) => {
 })
 
 export function startServer(port?: number): void {
-  const p = port ?? Number(process.env.PORT) ?? 3846
+  const envPort = Number(process.env.PORT)
+  const p = port ?? (Number.isFinite(envPort) ? envPort : 3846)
   server.listen(p, () => {
     console.log(`[Bifrost] Server listening on http://localhost:${p}`)
   })

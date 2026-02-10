@@ -93,6 +93,29 @@ export function parseBatchToCanonical(batch: string | null | undefined): BatchPa
     }
   }
 
+  // Month name only (no year): "March", "Mar", "MARCH" → infer year from current date
+  const monthOnly = raw.toUpperCase().trim()
+  let monthIndex = MONTH_NAMES.findIndex((m) => m === monthOnly || m.startsWith(monthOnly))
+  if (monthIndex === -1) {
+    const abbrev = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
+    monthIndex = MONTH_ABBREV.findIndex((m) => m === abbrev)
+  }
+  if (monthIndex >= 0) {
+    const now = new Date()
+    const currentMonth = now.getMonth() // 0-based
+    const currentYear = now.getFullYear()
+    // If the batch month is before the current month, assume next year
+    const y = monthIndex < currentMonth ? currentYear + 1 : currentYear
+    const m = monthIndex + 1
+    const monthName = MONTH_NAMES[monthIndex]
+    return {
+      canonicalKey: `${y}-${String(m).padStart(2, '0')}`,
+      expectedFileName: `${monthName} ${y} - PerformanceAds`,
+      year: y,
+      month: m,
+    }
+  }
+
   return null
 }
 

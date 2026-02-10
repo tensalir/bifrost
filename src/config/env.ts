@@ -16,6 +16,8 @@ const envSchema = z.object({
   BIFROST_BATCH_FILE_MAP: z.string().optional(),
   /** Dry run: do not write to Figma or Monday. */
   BIFROST_DRY_RUN: z.enum(['true', 'false', '1', '0', '']).optional(),
+  /** Claude API key for mapping agent; omit to use column-only fallback. */
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

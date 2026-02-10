@@ -38,6 +38,7 @@ export function buildIdempotencyKey(mondayItemId: string, statusTransitionId?: s
 /**
  * Create Figma experiment page (server path) or queue for plugin.
  * V1: server path is disabled (REST cannot create pages); we always queue.
+ * When nodeMapping/frameRenames are provided (from mapping agent), the plugin applies them by node name.
  */
 export function createOrQueueFigmaPage(
   briefing: BriefingDTO,
@@ -45,6 +46,8 @@ export function createOrQueueFigmaPage(
     mondayBoardId: string
     idempotencyKey?: string
     statusTransitionId?: string
+    nodeMapping?: Array<{ nodeName: string; value: string }>
+    frameRenames?: Array<{ oldName: string; newName: string }>
   }
 ): CreateOrQueueResult {
   const idempotencyKey = options.idempotencyKey ?? buildIdempotencyKey(briefing.mondayItemId, options.statusTransitionId)
@@ -102,6 +105,8 @@ export function createOrQueueFigmaPage(
     expectedFileName: target.expectedFileName,
     experimentPageName: formatExperimentPageName(briefing),
     briefingPayload: briefing,
+    nodeMapping: options.nodeMapping,
+    frameRenames: options.frameRenames,
   })
 
   return {

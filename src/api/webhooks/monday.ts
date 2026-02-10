@@ -7,6 +7,11 @@ import { mondayGraphql } from '../../integrations/monday/client.js'
 import type { MondayItem } from '../../integrations/monday/client.js'
 import { mondayItemToBriefing } from '../../domain/briefing/mondayToBriefing.js'
 import { createOrQueueFigmaPage, buildIdempotencyKey } from '../../orchestration/createOrQueueFigmaPage.js'
+import { resolveFigmaTarget } from '../../orchestration/resolveFigmaTarget.js'
+import { getTemplateNodeTree } from '../../integrations/figma/templateCache.js'
+import { computeNodeMapping } from '../../agents/mappingAgent.js'
+import { getDocContent, getDocIdFromColumnValue } from '../../integrations/monday/docReader.js'
+import { columnMap, getCol } from '../../integrations/monday/client.js'
 
 export interface MondayWebhookPayload {
   challenge?: string
@@ -20,24 +25,49 @@ export interface MondayWebhookPayload {
   value?: unknown
 }
 
-/** Fetch single item by board + item id. */
+/** Fetch single item by board + item id. Uses Monday API v2 column_values schema. */
 async function getMondayItem(boardId: string, itemId: string): Promise<MondayItem | null> {
   const data = await mondayGraphql<{
-    boards?: Array<{
-      items_page?: { items?: MondayItem[] }
+    items?: Array<{
+      id: string
+      name: string
+      column_values: Array<{
+        id: string
+        text: string | null
+        value: string | null
+        type: string
+        column: { title: string }
+      }>
     }>
   }>(
-    `query ($boardId: ID!, $itemId: ID!) {
-      boards(ids: [$boardId]) {
-        items_page(limit: 1, query_params: { ids: [$itemId] }) {
-          items { id name column_values { id title text value type } }
+    `query ($ids: [ID!]!) {
+      items(ids: $ids) {
+        id
+        name
+        column_values {
+          id
+          text
+          value
+          type
+          column { title }
         }
       }
     }`,
-    { boardId, itemId }
+    { ids: [itemId] }
   )
-  const items = data?.boards?.[0]?.items_page?.items
-  return items?.[0] ?? null
+  const raw = data?.items?.[0]
+  if (!raw) return null
+  return {
+    id: raw.id,
+    name: raw.name,
+    column_values: raw.column_values.map((cv) => ({
+      id: cv.id,
+      title: cv.column.title,
+      text: cv.text,
+      value: cv.value,
+      type: cv.type,
+    })),
+  } as MondayItem
 }
 
 /**
@@ -101,10 +131,33 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
   const timestamp = (body as Record<string, string>).timestamp ?? new Date().toISOString()
   const idempotencyKey = buildIdempotencyKey(itemId, timestamp)
 
+  let nodeMapping: Array<{ nodeName: string; value: string }> | undefined
+  let frameRenames: Array<{ oldName: string; newName: string }> | undefined
+  const target = resolveFigmaTarget(briefing.batchRaw ?? briefing.batchCanonical)
+  if (target?.figmaFileKey) {
+    try {
+      const tree = await getTemplateNodeTree(target.figmaFileKey)
+      let mondayDocContent: string | null = null
+      const col = columnMap(item)
+      const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
+      const docId = getDocIdFromColumnValue(briefRaw ?? null)
+      if (docId) mondayDocContent = await getDocContent(docId)
+      const mapping = await computeNodeMapping(item, tree, {
+        mondayDocContent: mondayDocContent ?? undefined,
+      })
+      nodeMapping = mapping.textMappings
+      frameRenames = mapping.frameRenames
+    } catch (_) {
+      // Fallback: createOrQueueFigmaPage will use briefingPayload-only (plugin fallback)
+    }
+  }
+
   const result = createOrQueueFigmaPage(briefing, {
     mondayBoardId: boardId,
     idempotencyKey,
     statusTransitionId: timestamp,
+    nodeMapping,
+    frameRenames,
   })
 
   return {

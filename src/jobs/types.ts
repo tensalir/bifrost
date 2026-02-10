@@ -15,8 +15,12 @@ export interface PendingSyncJob {
   expectedFileName: string
   /** Experiment page name for Figma */
   experimentPageName: string
-  /** Briefing payload for template fill */
+  /** Briefing payload for template fill (sectionName, etc.); kept for backward compat */
   briefingPayload: unknown
+  /** Pre-computed text node name → value (from mapping agent); plugin applies by node.name */
+  nodeMapping?: Array<{ nodeName: string; value: string }>
+  /** Pre-computed frame renames (e.g. NAME-EXP-4x5 → {experimentName}-A-4x5) */
+  frameRenames?: Array<{ oldName: string; newName: string }>
   state: PendingSyncJobState
   createdAt: string
   updatedAt: string

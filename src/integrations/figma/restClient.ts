@@ -20,12 +20,13 @@ export interface FigmaFileMeta {
  */
 export async function getFile(
   fileKey: string,
-  options?: { depth?: number }
+  options?: { depth?: number; ids?: string[] }
 ): Promise<FigmaFileMeta | null> {
   const token = getFigmaToken()
   if (!token) return null
   const url = new URL(`${FIGMA_API_BASE}/files/${fileKey}`)
   if (options?.depth != null) url.searchParams.set('depth', String(options.depth))
+  if (options?.ids?.length) url.searchParams.set('ids', options.ids.join(','))
   const res = await fetch(url.toString(), { headers: { 'X-Figma-Token': token } })
   if (!res.ok) {
     if (res.status === 403 || res.status === 404) return null

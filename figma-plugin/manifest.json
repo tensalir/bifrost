@@ -6,7 +6,8 @@
   "documentAccess": "dynamic-page",
   "editorType": ["figma"],
   "networkAccess": {
-    "allowedDomains": ["localhost", "127.0.0.1"],
+    "allowedDomains": ["*"],
+    "devAllowedDomains": ["*"],
     "reasoning": "Plugin fetches queued jobs from Bifrost backend (default http://localhost:3846)."
   }
 }
