@@ -11,6 +11,12 @@ export interface BriefingDTO {
   batchCanonical: string
   /** Raw batch value from Monday (e.g. MARCH 2026) */
   batchRaw: string | null
+  /**
+   * Section name for page ordering in Figma.
+   * Maps to the empty divider page (e.g. "BUNDLES", "SWITCH", "ENGAGED KITS").
+   * Sourced from Monday "use_case" / "product" column, or parsed from experiment name.
+   */
+  sectionName?: string
   idea?: string
   audienceRegion?: string
   segment?: string

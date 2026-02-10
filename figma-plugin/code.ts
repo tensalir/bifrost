@@ -47,11 +47,57 @@ async function runSyncQueuedBriefings(): Promise<{ done: number; failed: string[
   }
   interface BriefingPayload {
     experimentName?: string
+    /** Section name for page ordering (e.g. "BUNDLES", "SWITCH", "ENGAGED KITS") */
+    sectionName?: string
     idea?: string
     audienceRegion?: string
     segment?: string
     formats?: string
     variants?: Array<{ headline?: string; subline?: string; cta?: string }>
+  }
+
+  /**
+   * Find the insertion index for a new experiment page under its section divider.
+   * Section dividers are empty pages whose names match the sectionName.
+   * Returns the index after the last page in that section (before the next section divider
+   * or at the end of the page list). Returns -1 if no matching section found.
+   *
+   * Logic:
+   * 1. Walk figma.root.children to find all section dividers (pages that don't start with "EXP-"
+   *    and aren't template/utility pages).
+   * 2. Find the divider whose name matches sectionName (case-insensitive, includes partial).
+   * 3. The insertion point is right before the next section divider (or end of list).
+   */
+  function findSectionInsertionIndex(sectionName: string, allPages: readonly PageNode[]): number {
+    const UTILITY_PREFIXES = ['Briefing Template', 'Template', 'Cover', 'Status', 'Safe Zone', 'Export']
+    const upper = sectionName.toUpperCase().trim()
+
+    // Identify section divider indices
+    const dividers: Array<{ index: number; name: string }> = []
+    for (let i = 0; i < allPages.length; i++) {
+      const page = allPages[i]
+      const name = page.name.trim()
+      // Skip experiment pages and utility/template pages
+      if (name.toUpperCase().startsWith('EXP-')) continue
+      if (UTILITY_PREFIXES.some((p) => name.includes(p))) continue
+      // Also skip page dividers with just dashes/spaces
+      if (/^[-—–\s*]+$/.test(name)) continue
+      dividers.push({ index: i, name: name.toUpperCase() })
+    }
+
+    // Find matching divider
+    const matchIdx = dividers.findIndex(
+      (d) => d.name === upper || d.name.includes(upper) || upper.includes(d.name)
+    )
+    if (matchIdx === -1) return -1
+
+    const divider = dividers[matchIdx]
+    // Insertion point: just before the next section divider, or at end of pages
+    const nextDivider = dividers[matchIdx + 1]
+    if (nextDivider) {
+      return nextDivider.index // insert before the next section divider
+    }
+    return allPages.length // append at end (after all pages in the last section)
   }
 
   function getPlaceholderValue(placeholderId: string, briefing: BriefingPayload): string {
@@ -104,11 +150,26 @@ async function runSyncQueuedBriefings(): Promise<{ done: number; failed: string[
 
   for (const job of jobs) {
     try {
+      const briefing = job.briefingPayload as BriefingPayload
       const cloned = templatePage.clone()
       cloned.name = job.experimentPageName
       cloned.setPluginData('bifrostIdempotencyKey', job.idempotencyKey)
       cloned.setPluginData('bifrostMondayItemId', job.mondayItemId ?? '')
-      fillTextNodes(cloned, job.briefingPayload as BriefingPayload)
+      if (briefing.sectionName) {
+        cloned.setPluginData('bifrostSectionName', briefing.sectionName)
+      }
+
+      // Move cloned page to correct position under its section divider
+      if (briefing.sectionName) {
+        const allPages = root.children.filter((c): c is PageNode => c.type === 'PAGE')
+        const insertAt = findSectionInsertionIndex(briefing.sectionName, allPages)
+        if (insertAt >= 0 && insertAt < root.children.length) {
+          root.insertChild(insertAt, cloned)
+        }
+        // If insertAt === -1 or >= length, cloned stays where clone() put it (end)
+      }
+
+      fillTextNodes(cloned, briefing)
       const pageId = cloned.id
       const fileUrl = `https://www.figma.com/file/${fileKey}?node-id=${encodeURIComponent(pageId.replace(':', '-'))}`
 
