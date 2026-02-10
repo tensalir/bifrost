@@ -3,7 +3,8 @@
  */
 
 import { createServer } from 'node:http'
-import { handleMondayWebhook } from './webhooks/monday.js'
+import { getEnv } from '../config/env.js'
+import { handleMondayWebhook, queueMondayItem } from './webhooks/monday.js'
 import {
   getAllPendingJobs,
   getPendingJobsByFileKey,
@@ -61,6 +62,23 @@ const server = createServer(async (req, res) => {
       send(res, 200, { challenge: result.challenge })
     } else {
       send(res, 200, { received: result.received, inserted: result.inserted, outcome: result.outcome, message: result.message, error: result.error })
+    }
+    return
+  }
+
+  if (path === '/api/jobs/queue' && method === 'POST') {
+    const body = (await parseJsonBody(req)) as Record<string, unknown>
+    const itemId = String(body.mondayItemId ?? body.item_id ?? '')
+    const boardId = String(body.mondayBoardId ?? body.board_id ?? getEnv().MONDAY_BOARD_ID ?? '')
+    if (!itemId || !boardId) {
+      send(res, 400, { error: 'mondayItemId and mondayBoardId (or MONDAY_BOARD_ID) required' })
+      return
+    }
+    try {
+      const result = await queueMondayItem(boardId, itemId)
+      send(res, 200, result)
+    } catch (e) {
+      send(res, 500, { error: String(e instanceof Error ? e.message : e) })
     }
     return
   }

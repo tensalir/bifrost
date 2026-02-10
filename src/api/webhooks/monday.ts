@@ -26,7 +26,7 @@ export interface MondayWebhookPayload {
 }
 
 /** Fetch single item by board + item id. Uses Monday API v2 column_values schema. */
-async function getMondayItem(boardId: string, itemId: string): Promise<MondayItem | null> {
+export async function getMondayItem(boardId: string, itemId: string): Promise<MondayItem | null> {
   const data = await mondayGraphql<{
     items?: Array<{
       id: string
@@ -165,5 +165,73 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     inserted: result.outcome === 'queued' || result.outcome === 'created',
     outcome: result.outcome,
     message: result.message,
+  }
+}
+
+/**
+ * Queue a briefing for a Monday item. Used by webhook and manual API.
+ * Returns createOrQueue result for API responses.
+ */
+export async function queueMondayItem(
+  boardId: string,
+  itemId: string,
+  options?: { idempotencySuffix?: string }
+): Promise<{
+  outcome: string
+  message: string
+  job?: { id: string; experimentPageName: string; figmaFileKey?: string }
+  error?: string
+}> {
+  const item = await getMondayItem(boardId, itemId)
+  if (!item) {
+    return { outcome: 'failed', message: 'Item not found', error: 'Item not found' }
+  }
+
+  const briefing = mondayItemToBriefing(item)
+  if (!briefing) {
+    return { outcome: 'failed', message: 'Batch missing or unparseable', error: 'Batch missing' }
+  }
+
+  const suffix = options?.idempotencySuffix ?? `manual-${Date.now()}`
+  const idempotencyKey = buildIdempotencyKey(itemId, suffix)
+
+  let nodeMapping: Array<{ nodeName: string; value: string }> | undefined
+  let frameRenames: Array<{ oldName: string; newName: string }> | undefined
+  const target = resolveFigmaTarget(briefing.batchRaw ?? briefing.batchCanonical)
+  if (target?.figmaFileKey) {
+    try {
+      const tree = await getTemplateNodeTree(target.figmaFileKey)
+      const col = columnMap(item)
+      const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
+      const docId = getDocIdFromColumnValue(briefRaw ?? null)
+      const mondayDocContent = docId ? await getDocContent(docId) : null
+      const mapping = await computeNodeMapping(item, tree, {
+        mondayDocContent: mondayDocContent ?? undefined,
+      })
+      nodeMapping = mapping.textMappings
+      frameRenames = mapping.frameRenames
+    } catch (_) {
+      // Fallback: briefingPayload-only
+    }
+  }
+
+  const result = createOrQueueFigmaPage(briefing, {
+    mondayBoardId: boardId,
+    idempotencyKey,
+    statusTransitionId: suffix,
+    nodeMapping,
+    frameRenames,
+  })
+
+  return {
+    outcome: result.outcome,
+    message: result.message ?? '',
+    job: result.job
+      ? {
+          id: result.job.id,
+          experimentPageName: result.job.experimentPageName,
+          figmaFileKey: result.figmaFileKey ?? undefined,
+        }
+      : undefined,
   }
 }

@@ -445,6 +445,12 @@ function makeBlockFrame(): FrameNode {
   return frame
 }
 
+/** Append a child to an auto-layout parent and set it to stretch/fill cross-axis. */
+function appendAndStretch(parent: FrameNode, child: SceneNode): void {
+  parent.appendChild(child)
+  try { (child as any).layoutAlign = 'STRETCH' } catch (_) {}
+}
+
 async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   try {
     await figma.loadFontAsync(TEMPLATE_FONT)
@@ -522,36 +528,39 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
       elements.counterAxisSizingMode = 'FIXED'
       elements.itemSpacing = 6
       elements.fills = []
-      block.appendChild(elements)
-      elements.appendChild(makeTextNode(item.label, item.label, font))
+      appendAndStretch(block, elements)
+      const label = makeTextNode(item.label, item.label, font)
+      appendAndStretch(elements, label)
       const specs = figma.createFrame()
       specs.name = 'Specs'
       specs.layoutMode = 'VERTICAL'
       specs.primaryAxisSizingMode = 'AUTO'
       specs.counterAxisSizingMode = 'FIXED'
       specs.fills = []
-      specs.appendChild(makeTextNode('-', '-', font))
-      elements.appendChild(specs)
+      appendAndStretch(elements, specs)
+      const dash = makeTextNode('-', '-', font)
+      appendAndStretch(specs, dash)
     } else {
-      block.appendChild(makeTextNode(item.label, item.value, font))
+      const tn = makeTextNode(item.label, item.value, font)
+      appendAndStretch(block, tn)
     }
-    briefingCol.appendChild(block)
+    appendAndStretch(briefingCol, block)
   }
   for (const letter of ['A', 'B', 'C', 'D']) {
     const block = makeBlockFrame()
     const text = makeTextNode(`${letter} - Image`, `${letter} - Image`, font)
-    block.appendChild(text)
-    briefingCol.appendChild(block)
+    appendAndStretch(block, text)
+    appendAndStretch(briefingCol, block)
   }
 
   const copyCol = makeColumnFrame('Copy', colW)
   row.appendChild(copyCol)
   let copyBlock = makeBlockFrame()
-  copyCol.appendChild(copyBlock)
-  copyBlock.appendChild(makeTextNode('Copy', 'Copy', font))
+  appendAndStretch(copyCol, copyBlock)
+  appendAndStretch(copyBlock, makeTextNode('Copy', 'Copy', font))
   copyBlock = makeBlockFrame()
-  copyCol.appendChild(copyBlock)
-  copyBlock.appendChild(makeTextNode('Not Started', 'Not Started', font))
+  appendAndStretch(copyCol, copyBlock)
+  appendAndStretch(copyBlock, makeTextNode('Not Started', 'Not Started', font))
   for (const letter of ['A', 'B', 'C', 'D']) {
     const varFrame = figma.createFrame()
     varFrame.name = `Variation ${letter}`
@@ -562,28 +571,28 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12
     varFrame.fills = [{ type: 'SOLID', color: { r: 0.92, g: 0.92, b: 0.94 } }]
     varFrame.resize(colW, 100)
-    copyCol.appendChild(varFrame)
+    appendAndStretch(copyCol, varFrame)
     let b = makeBlockFrame()
-    varFrame.appendChild(b)
-    b.appendChild(makeTextNode(`Variation ${letter}`, `Variation ${letter}`, font))
+    appendAndStretch(varFrame, b)
+    appendAndStretch(b, makeTextNode(`Variation ${letter}`, `Variation ${letter}`, font))
     b = makeBlockFrame()
-    varFrame.appendChild(b)
-    b.appendChild(makeTextNode('in design copy', 'in design copy', font))
+    appendAndStretch(varFrame, b)
+    appendAndStretch(b, makeTextNode('in design copy', 'in design copy', font))
     for (const field of ['headline:', 'subline:', 'CTA:', 'Note:']) {
       b = makeBlockFrame()
-      varFrame.appendChild(b)
-      b.appendChild(makeTextNode(field, field, font))
+      appendAndStretch(varFrame, b)
+      appendAndStretch(b, makeTextNode(field, field, font))
     }
   }
 
   const designCol = makeColumnFrame('Design', 900)
   row.appendChild(designCol)
   let designBlock = makeBlockFrame()
-  designCol.appendChild(designBlock)
-  designBlock.appendChild(makeTextNode('Design', 'Design', font))
+  appendAndStretch(designCol, designBlock)
+  appendAndStretch(designBlock, makeTextNode('Design', 'Design', font))
   designBlock = makeBlockFrame()
-  designCol.appendChild(designBlock)
-  designBlock.appendChild(makeTextNode('Not Started', 'Not Started', font))
+  appendAndStretch(designCol, designBlock)
+  appendAndStretch(designBlock, makeTextNode('Not Started', 'Not Started', font))
   const sizes = ['4x5', '9x16', '1x1']
   for (const letter of ['A', 'B', 'C', 'D']) {
     const varFrame = figma.createFrame()
@@ -595,7 +604,7 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12
     varFrame.fills = []
     varFrame.resize(900, 100)
-    designCol.appendChild(varFrame)
+    appendAndStretch(designCol, varFrame)
     const assetRow = figma.createFrame()
     assetRow.name = 'Assets'
     assetRow.layoutMode = 'HORIZONTAL'
@@ -604,24 +613,24 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     assetRow.itemSpacing = 12
     assetRow.fills = []
     assetRow.resize(900, 200)
-    varFrame.appendChild(assetRow)
+    appendAndStretch(varFrame, assetRow)
     for (const size of sizes) {
       const f = figma.createFrame()
       f.name = 'NAME-EXP-' + size
       f.resize(size === '4x5' ? 144 : size === '9x16' ? 108 : 144, size === '4x5' ? 180 : size === '9x16' ? 192 : 144)
       f.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]
-      assetRow.appendChild(f)
+      assetRow.appendChild(f) // asset frames: do NOT stretch (keep design ratio sizes)
     }
   }
 
   const uploadsCol = makeColumnFrame('Uploads', 280)
   row.appendChild(uploadsCol)
   let uploadsBlock = makeBlockFrame()
-  uploadsCol.appendChild(uploadsBlock)
-  uploadsBlock.appendChild(makeTextNode('Uploads', 'Uploads', font))
+  appendAndStretch(uploadsCol, uploadsBlock)
+  appendAndStretch(uploadsBlock, makeTextNode('Uploads', 'Uploads', font))
   uploadsBlock = makeBlockFrame()
-  uploadsCol.appendChild(uploadsBlock)
-  uploadsBlock.appendChild(makeTextNode('Frontify', 'Frontify', font))
+  appendAndStretch(uploadsCol, uploadsBlock)
+  appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font))
 
   await figma.setCurrentPageAsync(templatePage)
   return {}
@@ -629,6 +638,342 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     return { error: e instanceof Error ? e.message : 'Failed to create template' }
   }
 }
+
+// =====================================================
+// Smart Layout Normalization System
+// =====================================================
+// After content is synced from Monday, this system:
+//   1. Analyzes how content is placed in the template
+//   2. Ensures all text nodes auto-resize to fit content
+//   3. Detects stacked frame patterns and enables auto-layout
+//   4. Propagates size changes up the frame hierarchy
+// Result: components scale proportionally with content,
+// siblings reflow automatically, no cramming or overflow.
+// =====================================================
+
+interface LayoutAnalysis {
+  textNodesFixed: number
+  framesConverted: number
+  framesHugged: number
+  childrenStretched: number
+  skippedFrames: string[]
+}
+
+/**
+ * Detect whether children of a frame are arranged in a vertical stack,
+ * horizontal row, or free-form (overlapping / absolute).
+ */
+function detectChildArrangement(frame: FrameNode): 'VERTICAL' | 'HORIZONTAL' | 'NONE' {
+  const kids = frame.children.filter((c) => (c as SceneNode).visible !== false) as SceneNode[]
+  if (kids.length < 2) return 'VERTICAL' // single child → treat as vertical
+
+  // Check vertical stacking: each child starts at/below previous bottom
+  const sortedY = [...kids].sort((a, b) => a.y - b.y)
+  let vertPairs = 0
+  for (let i = 1; i < sortedY.length; i++) {
+    if (sortedY[i].y >= sortedY[i - 1].y + sortedY[i - 1].height - 4) vertPairs++
+  }
+
+  // Check horizontal stacking: each child starts at/after previous right edge
+  const sortedX = [...kids].sort((a, b) => a.x - b.x)
+  let horizPairs = 0
+  for (let i = 1; i < sortedX.length; i++) {
+    if (sortedX[i].x >= sortedX[i - 1].x + sortedX[i - 1].width - 4) horizPairs++
+  }
+
+  const threshold = (kids.length - 1) * 0.6
+  if (vertPairs >= threshold) return 'VERTICAL'
+  if (horizPairs >= threshold) return 'HORIZONTAL'
+  return 'NONE'
+}
+
+/**
+ * Calculate the median spacing between consecutive children along an axis.
+ */
+function medianChildSpacing(frame: FrameNode, dir: 'VERTICAL' | 'HORIZONTAL'): number {
+  const kids = frame.children.filter((c) => (c as SceneNode).visible !== false) as SceneNode[]
+  if (kids.length < 2) return 8
+  const sorted = [...kids].sort((a, b) => dir === 'VERTICAL' ? a.y - b.y : a.x - b.x)
+  const gaps: number[] = []
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = dir === 'VERTICAL'
+      ? sorted[i].y - (sorted[i - 1].y + sorted[i - 1].height)
+      : sorted[i].x - (sorted[i - 1].x + sorted[i - 1].width)
+    if (gap >= 0) gaps.push(gap)
+  }
+  if (gaps.length === 0) return 8
+  gaps.sort((a, b) => a - b)
+  return Math.round(gaps[Math.floor(gaps.length / 2)])
+}
+
+/**
+ * Estimate frame padding by examining child positions relative to frame bounds.
+ */
+function estimateFramePadding(frame: FrameNode): { top: number; left: number; bottom: number; right: number } {
+  const kids = frame.children.filter((c) => (c as SceneNode).visible !== false) as SceneNode[]
+  if (kids.length === 0) return { top: 0, left: 0, bottom: 0, right: 0 }
+  let minX = Infinity, minY = Infinity, maxR = 0, maxB = 0
+  for (const k of kids) {
+    minX = Math.min(minX, k.x)
+    minY = Math.min(minY, k.y)
+    maxR = Math.max(maxR, k.x + k.width)
+    maxB = Math.max(maxB, k.y + k.height)
+  }
+  return {
+    top: Math.max(0, Math.round(minY)),
+    left: Math.max(0, Math.round(minX)),
+    bottom: Math.max(0, Math.round(frame.height - maxB)),
+    right: Math.max(0, Math.round(frame.width - maxR)),
+  }
+}
+
+/**
+ * Should we skip this frame from auto-layout conversion?
+ * Skips: asset frames (4x5), empty frames, frames without text/frame children.
+ */
+function shouldSkipAutoLayout(frame: FrameNode): boolean {
+  const name = frame.name.toLowerCase()
+  // Asset frames with ratio names (design canvases)
+  if (/\d+x\d+/.test(name)) return true
+  // No children
+  if (!frame.children || frame.children.length === 0) return true
+  // Already has auto-layout
+  if (frame.layoutMode !== 'NONE') return false
+  // No structural children (only rects/vectors/images)
+  return !frame.children.some((c) => c.type === 'TEXT' || c.type === 'FRAME' || c.type === 'GROUP')
+}
+
+/**
+ * Phase 1: Walk all text nodes and enable vertical auto-resize.
+ * This lets Figma compute the actual height each text node needs.
+ * Must run first so child heights are correct before frame sizing.
+ */
+async function phaseFixTextNodes(node: BaseNode): Promise<number> {
+  let count = 0
+  if (node.type === 'TEXT') {
+    const tn = node as TextNode
+    if (tn.characters && tn.characters.trim().length > 0 && tn.textAutoResize !== 'HEIGHT') {
+      try {
+        await loadFontsForTextNode(tn)
+        tn.textAutoResize = 'HEIGHT'
+        count++
+      } catch (_) {}
+    }
+  }
+  const container = node as { children?: readonly BaseNode[] }
+  if (container.children) {
+    for (const child of container.children) {
+      count += await phaseFixTextNodes(child)
+    }
+  }
+  return count
+}
+
+/**
+ * Phase 2: Bottom-up auto-layout conversion.
+ * For non-auto-layout frames with vertically/horizontally stacked children,
+ * detect the pattern, sort children to match visual order, enable auto-layout
+ * with inferred spacing and padding.
+ */
+function phaseEnableAutoLayout(node: BaseNode, analysis: LayoutAnalysis): void {
+  const container = node as { children?: readonly BaseNode[] }
+  if (container.children) {
+    for (const child of container.children) {
+      phaseEnableAutoLayout(child, analysis)
+    }
+  }
+  if (node.type !== 'FRAME') return
+  const frame = node as FrameNode
+  if (frame.layoutMode !== 'NONE') return // already has auto-layout
+  if (shouldSkipAutoLayout(frame)) {
+    analysis.skippedFrames.push(frame.name)
+    return
+  }
+
+  const arrangement = detectChildArrangement(frame)
+  if (arrangement === 'NONE') {
+    analysis.skippedFrames.push(frame.name)
+    return
+  }
+
+  // Infer spacing and padding from current positions
+  const spacing = medianChildSpacing(frame, arrangement)
+  const padding = estimateFramePadding(frame)
+  const savedWidth = frame.width
+  const savedHeight = frame.height
+
+  // Sort children to match visual order before enabling auto-layout.
+  // In Figma, auto-layout flows children in array order; we need
+  // that order to match the visual top→bottom / left→right order.
+  const sorted = [...frame.children].sort((a, b) =>
+    arrangement === 'VERTICAL'
+      ? (a as SceneNode).y - (b as SceneNode).y
+      : (a as SceneNode).x - (b as SceneNode).x
+  )
+  for (let i = 0; i < sorted.length; i++) {
+    frame.insertChild(i, sorted[i])
+  }
+
+  // Enable auto-layout with detected settings
+  frame.layoutMode = arrangement
+  frame.primaryAxisSizingMode = 'AUTO'  // hug content (grows with children)
+  frame.counterAxisSizingMode = 'FIXED' // keep cross-axis size
+  frame.counterAxisAlignItems = 'MIN'
+  frame.itemSpacing = Math.max(spacing, 4)
+  frame.paddingTop = padding.top
+  frame.paddingBottom = Math.max(padding.bottom, 4)
+  frame.paddingLeft = padding.left
+  frame.paddingRight = padding.right
+
+  // Restore the cross-axis dimension
+  if (arrangement === 'VERTICAL') {
+    frame.resize(savedWidth, frame.height)
+  } else {
+    frame.resize(frame.width, savedHeight)
+  }
+
+  analysis.framesConverted++
+}
+
+/**
+ * Phase 3: For frames already with auto-layout, ensure they hug content.
+ *
+ * VERTICAL frames: primaryAxis (height) = AUTO, counterAxis (width) = FIXED
+ *   → grows vertically with children, keeps fixed column width
+ * HORIZONTAL frames: primaryAxis (width) = AUTO, counterAxis (height) = AUTO
+ *   → grows horizontally with children AND vertically to match tallest child
+ *
+ * This ensures the Columns row expands to show the full Briefing column.
+ */
+function phaseEnsureHugContent(node: BaseNode, analysis: LayoutAnalysis): void {
+  if (node.type === 'FRAME') {
+    const frame = node as FrameNode
+    if (frame.layoutMode !== 'NONE') {
+      // Primary axis: always hug content
+      if (frame.primaryAxisSizingMode !== 'AUTO') {
+        frame.primaryAxisSizingMode = 'AUTO'
+        analysis.framesHugged++
+      }
+      // Counter axis: for HORIZONTAL frames, also hug so height grows
+      // to match the tallest child (e.g., Columns row matches Briefing col)
+      if (frame.layoutMode === 'HORIZONTAL' && frame.counterAxisSizingMode !== 'AUTO') {
+        frame.counterAxisSizingMode = 'AUTO'
+        analysis.framesHugged++
+      }
+    }
+  }
+  const container = node as { children?: readonly BaseNode[] }
+  if (container.children) {
+    for (const child of container.children) {
+      phaseEnsureHugContent(child, analysis)
+    }
+  }
+}
+
+/**
+ * Phase 4: Stretch children to fill parent cross-axis.
+ * In VERTICAL auto-layout frames, children should fill the parent width
+ * so text blocks use the full column width instead of staying at 100px.
+ * Skips asset frames (design canvases) and HORIZONTAL layout children.
+ */
+function phaseStretchChildren(node: BaseNode): number {
+  let count = 0
+  if (node.type === 'FRAME') {
+    const frame = node as FrameNode
+    // Only stretch in VERTICAL layouts — makes children fill width.
+    // In HORIZONTAL layouts, children keep their own width.
+    if (frame.layoutMode === 'VERTICAL') {
+      for (let i = 0; i < frame.children.length; i++) {
+        const child = frame.children[i] as SceneNode
+        // Skip asset frames (design canvases like 4x5, 9x16)
+        if (/\d+x\d+/.test(child.name)) continue
+        if (child.type === 'FRAME' || child.type === 'TEXT' || child.type === 'GROUP') {
+          try {
+            if ((child as any).layoutAlign !== 'STRETCH') {
+              (child as any).layoutAlign = 'STRETCH'
+              count++
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  }
+  const container = node as { children?: readonly BaseNode[] }
+  if (container.children) {
+    for (const child of container.children) {
+      count += phaseStretchChildren(child)
+    }
+  }
+  return count
+}
+
+/**
+ * Phase 5: Disable clipsContent on structural auto-layout frames.
+ * Ensures content is never hidden even during layout recalculation.
+ * Skips asset frames (design canvases) that need clipping.
+ */
+function phaseDisableClipping(node: BaseNode): number {
+  let count = 0
+  if (node.type === 'FRAME') {
+    const frame = node as FrameNode
+    if (frame.layoutMode !== 'NONE' && frame.clipsContent) {
+      // Skip asset-related frames
+      if (!/\d+x\d+/.test(frame.name)) {
+        frame.clipsContent = false
+        count++
+      }
+    }
+  }
+  const container = node as { children?: readonly BaseNode[] }
+  if (container.children) {
+    for (const child of container.children) {
+      count += phaseDisableClipping(child)
+    }
+  }
+  return count
+}
+
+/**
+ * Main entry: Smart Layout Normalization.
+ * Five-phase process that runs after content fill to ensure
+ * all components scale proportionally with their content.
+ *
+ * Phase 1 — Text: auto-resize HEIGHT on all text nodes (vertical growth)
+ * Phase 2 — Frames: detect stacked patterns, enable auto-layout (bottom-up)
+ * Phase 3 — Hug: ensure all auto-layout frames grow with children (both axes)
+ * Phase 4 — Stretch: children fill parent width (no more 100px cramming)
+ * Phase 5 — Unclip: disable clipsContent so nothing is hidden
+ */
+async function normalizeLayout(root: BaseNode): Promise<LayoutAnalysis> {
+  const analysis: LayoutAnalysis = {
+    textNodesFixed: 0,
+    framesConverted: 0,
+    framesHugged: 0,
+    childrenStretched: 0,
+    skippedFrames: [],
+  }
+
+  // Phase 1: text nodes — must be first so heights settle
+  analysis.textNodesFixed = await phaseFixTextNodes(root)
+
+  // Phase 2: bottom-up auto-layout on stacked frames
+  phaseEnableAutoLayout(root, analysis)
+
+  // Phase 3: existing auto-layout frames → hug content on both axes
+  phaseEnsureHugContent(root, analysis)
+
+  // Phase 4: stretch children to fill parent width
+  analysis.childrenStretched = phaseStretchChildren(root)
+
+  // Phase 5: disable clipping on structural frames
+  phaseDisableClipping(root)
+
+  return analysis
+}
+
+// =====================================================
+// End: Smart Layout Normalization System
+// =====================================================
 
 interface DebugEntry {
   nodeName: string
@@ -731,6 +1076,22 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       } else {
         await fillTextNodes(targetPage, briefing)
       }
+
+      // ── Smart Layout Normalization ──
+      // Analyze how content is placed and proportionally adjust frames,
+      // text nodes, and spacing to prevent cramming/overflow.
+      var layoutResult = await normalizeLayout(targetPage)
+      debugLog.push({
+        nodeName: '__LAYOUT_NORM__',
+        chars: 'textFixed=' + layoutResult.textNodesFixed
+          + ' framesConverted=' + layoutResult.framesConverted
+          + ' framesHugged=' + layoutResult.framesHugged
+          + ' stretched=' + layoutResult.childrenStretched
+          + ' skipped=[' + layoutResult.skippedFrames.slice(0, 5).join(', ') + ']',
+        path: [],
+        matched: true,
+      })
+
       var pageId = targetPage.id
       var fileUrl = 'https://www.figma.com/file/' + fileKey + '?node-id=' + encodeURIComponent(pageId.replace(':', '-'))
       results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: pageId, fileUrl: fileUrl })
@@ -776,8 +1137,13 @@ var uiHtml = '<html><head><style>'
   + '    .then(function(data) {'
   + '      var jobs = data.jobs || [];'
   + '      if (jobs.length === 0) {'
-  + '        document.getElementById("msg").textContent = "No queued jobs for this file.";'
-  + '        return;'
+  + '        document.getElementById("msg").textContent = "No file-specific jobs. Checking all queued...";'
+  + '        return fetch(BIFROST_API + "/api/jobs/queued").then(function(r2){return r2.json();}).then(function(d2){'
+  + '          var all = d2.jobs || [];'
+  + '          if (all.length === 0) { document.getElementById("msg").textContent = "No queued jobs."; return; }'
+  + '          document.getElementById("msg").textContent = "Found " + all.length + " job(s) (cross-file). Creating pages...";'
+  + '          parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: all } }, "*");'
+  + '        });'
   + '      }'
   + '      document.getElementById("msg").textContent = "Found " + jobs.length + " job(s). Creating pages...";'
   + '      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");'
