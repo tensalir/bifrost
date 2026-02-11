@@ -72,6 +72,7 @@ async function fillTextNodes(node, briefing) {
                     textNode.textAutoResize === 'WIDTH_AND_HEIGHT') {
                     textNode.textAutoResize = 'HEIGHT';
                 }
+                await styleFilledContent(textNode);
             }
             catch (_) { }
         }
@@ -312,6 +313,7 @@ async function applyNodeMapping(node, mappingEntries, frameRenames) {
                     targetNode.textAutoResize === 'WIDTH_AND_HEIGHT') {
                     targetNode.textAutoResize = 'HEIGHT';
                 }
+                await styleFilledContent(targetNode);
             }
             catch (_) { }
         }
@@ -371,6 +373,9 @@ function findSectionInsertionIndex(sectionName, allPages) {
     return allPages.length;
 }
 const TEMPLATE_FONT = { family: 'Inter', style: 'Regular' };
+const TEMPLATE_FONT_BOLD = { family: 'Inter', style: 'Bold' };
+const LABEL_FONT_SIZE = 14;
+const CONTENT_FONT_SIZE = 11;
 function makeColumnFrame(name, width) {
     const frame = figma.createFrame();
     frame.name = name;
@@ -382,6 +387,7 @@ function makeColumnFrame(name, width) {
     frame.itemSpacing = 8;
     frame.paddingTop = frame.paddingBottom = frame.paddingLeft = frame.paddingRight = 16;
     frame.fills = [{ type: 'SOLID', color: { r: 0.96, g: 0.96, b: 0.96 } }];
+    frame.clipsContent = false;
     return frame;
 }
 function makeTextNode(name, placeholder, font) {
@@ -394,6 +400,85 @@ function makeTextNode(name, placeholder, font) {
     text.textAutoResize = 'HEIGHT';
     return text;
 }
+/** Track whether Bold font loaded successfully. */
+var boldFontAvailable = false;
+/**
+ * Try to load the Bold font once; cache the result so we don't
+ * retry on every text node if it's unavailable.
+ */
+async function ensureBoldFont() {
+    if (boldFontAvailable)
+        return true;
+    try {
+        await figma.loadFontAsync(TEMPLATE_FONT_BOLD);
+        boldFontAvailable = true;
+        return true;
+    }
+    catch (_) {
+        return false;
+    }
+}
+/**
+ * Style filled content with two-tier typography:
+ *   - Label prefixes (text before ':' on each line) → Bold, larger
+ *   - Value text (everything else) → Regular, smaller
+ * Gracefully degrades if Bold font is unavailable (only adjusts size).
+ */
+async function styleFilledContent(textNode) {
+    const text = textNode.characters;
+    if (!text || text.length === 0)
+        return;
+    try {
+        await figma.loadFontAsync(TEMPLATE_FONT);
+    }
+    catch (_) {
+        return;
+    }
+    const hasBold = await ensureBoldFont();
+    const len = text.length;
+    // Set entire text to content style (regular, smaller)
+    textNode.setRangeFontName(0, len, TEMPLATE_FONT);
+    textNode.setRangeFontSize(0, len, CONTENT_FONT_SIZE);
+    textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: CONTENT_FONT_SIZE + 5 });
+    // Find label prefixes on each line and make them bold + larger.
+    // Pattern: up to 30 chars of label-like text ending with ':'
+    const lines = text.split('\n');
+    let offset = 0;
+    for (const line of lines) {
+        const m = /^([A-Za-z0-9\s/\-_&().]+:)/.exec(line);
+        if (m && m[1].length <= 30) {
+            const labelEnd = offset + m[1].length;
+            if (hasBold) {
+                textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD);
+            }
+            textNode.setRangeFontSize(offset, labelEnd, LABEL_FONT_SIZE);
+            textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 });
+        }
+        offset += line.length + 1; // +1 for the \n
+    }
+}
+/**
+ * Style unfilled template labels (text that wasn't replaced by content).
+ * These get Bold + larger font to act as section headers.
+ */
+async function styleTemplateLabel(textNode) {
+    const text = textNode.characters;
+    if (!text || text.length === 0)
+        return;
+    try {
+        await figma.loadFontAsync(TEMPLATE_FONT);
+    }
+    catch (_) {
+        return;
+    }
+    const hasBold = await ensureBoldFont();
+    const len = text.length;
+    if (hasBold) {
+        textNode.setRangeFontName(0, len, TEMPLATE_FONT_BOLD);
+    }
+    textNode.setRangeFontSize(0, len, LABEL_FONT_SIZE);
+    textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 });
+}
 function makeBlockFrame() {
     const frame = figma.createFrame();
     frame.name = 'Block';
@@ -405,6 +490,7 @@ function makeBlockFrame() {
     frame.paddingTop = frame.paddingBottom = 8;
     frame.paddingLeft = frame.paddingRight = 12;
     frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    frame.clipsContent = false;
     return frame;
 }
 /** Append a child to an auto-layout parent and set it to stretch/fill cross-axis. */
@@ -418,9 +504,10 @@ function appendAndStretch(parent, child) {
 async function createAutoLayoutTemplate() {
     try {
         await figma.loadFontAsync(TEMPLATE_FONT);
+        await figma.loadFontAsync(TEMPLATE_FONT_BOLD);
     }
     catch (e) {
-        return { error: 'Could not load Inter font' };
+        return { error: 'Could not load Inter fonts' };
     }
     const font = TEMPLATE_FONT;
     const root = figma.root;
@@ -445,6 +532,7 @@ async function createAutoLayoutTemplate() {
         section.itemSpacing = 12;
         section.paddingTop = section.paddingBottom = section.paddingLeft = section.paddingRight = 24;
         section.fills = [];
+        section.clipsContent = false;
         section.resize(2400, 100);
         templatePage.appendChild(section);
         const row = figma.createFrame();
@@ -456,7 +544,7 @@ async function createAutoLayoutTemplate() {
         row.itemSpacing = 40;
         row.paddingTop = row.paddingBottom = row.paddingLeft = row.paddingRight = 0;
         row.fills = [];
-        row.resize(2200, 400);
+        row.clipsContent = false;
         section.appendChild(row);
         const colW = 400;
         const briefingCol = makeColumnFrame('Briefing', colW);
@@ -531,6 +619,7 @@ async function createAutoLayoutTemplate() {
             varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12;
             varFrame.fills = [{ type: 'SOLID', color: { r: 0.92, g: 0.92, b: 0.94 } }];
             varFrame.resize(colW, 100);
+            varFrame.clipsContent = false;
             appendAndStretch(copyCol, varFrame);
             let b = makeBlockFrame();
             appendAndStretch(varFrame, b);
@@ -563,6 +652,7 @@ async function createAutoLayoutTemplate() {
             varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12;
             varFrame.fills = [];
             varFrame.resize(900, 100);
+            varFrame.clipsContent = false;
             appendAndStretch(designCol, varFrame);
             const assetRow = figma.createFrame();
             assetRow.name = 'Assets';
@@ -589,6 +679,18 @@ async function createAutoLayoutTemplate() {
         uploadsBlock = makeBlockFrame();
         appendAndStretch(uploadsCol, uploadsBlock);
         appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font));
+        // Apply bold styling to all template text nodes
+        async function boldAllText(node) {
+            if (node.type === 'TEXT') {
+                await styleTemplateLabel(node);
+            }
+            const c = node;
+            if (c.children) {
+                for (const child of c.children)
+                    await boldAllText(child);
+            }
+        }
+        await boldAllText(section);
         await figma.setCurrentPageAsync(templatePage);
         return {};
     }
@@ -868,9 +970,43 @@ function phaseDisableClipping(node) {
     }
     return count;
 }
+/** Known template label names/texts that should get bold styling when unfilled. */
+const TEMPLATE_LABEL_PATTERNS = new Set([
+    'briefing', 'not started', 'copy', 'design', 'uploads', 'frontify',
+    'variation a', 'variation b', 'variation c', 'variation d',
+    'in design copy', 'headline:', 'subline:', 'cta:', 'note:', 'variants',
+]);
+/**
+ * Phase 6: Style unfilled template labels as Bold + larger.
+ * Text nodes that still contain their original short template text
+ * (headers, section labels) get bold styling for visual hierarchy.
+ */
+async function phaseStyleTemplateLabels(node) {
+    let count = 0;
+    if (node.type === 'TEXT') {
+        const tn = node;
+        const text = (tn.characters || '').trim();
+        // Only style short template labels (not filled multi-line content)
+        if (text.length > 0 && text.length <= 40 && !text.includes('\n')) {
+            const lower = text.toLowerCase();
+            // Match known template labels or very short placeholder-like text
+            if (TEMPLATE_LABEL_PATTERNS.has(lower) || /^[A-D] - (image|video|static|carousel)$/i.test(text)) {
+                await styleTemplateLabel(tn);
+                count++;
+            }
+        }
+    }
+    const container = node;
+    if (container.children) {
+        for (const child of container.children) {
+            count += await phaseStyleTemplateLabels(child);
+        }
+    }
+    return count;
+}
 /**
  * Main entry: Smart Layout Normalization.
- * Five-phase process that runs after content fill to ensure
+ * Six-phase process that runs after content fill to ensure
  * all components scale proportionally with their content.
  *
  * Phase 1 — Text: auto-resize HEIGHT on all text nodes (vertical growth)
@@ -878,6 +1014,7 @@ function phaseDisableClipping(node) {
  * Phase 3 — Hug: ensure all auto-layout frames grow with children (both axes)
  * Phase 4 — Stretch: children fill parent width (no more 100px cramming)
  * Phase 5 — Unclip: disable clipsContent so nothing is hidden
+ * Phase 6 — Style: bold template labels, sized content text
  */
 async function normalizeLayout(root) {
     const analysis = {
@@ -897,6 +1034,8 @@ async function normalizeLayout(root) {
     analysis.childrenStretched = phaseStretchChildren(root);
     // Phase 5: disable clipping on structural frames
     phaseDisableClipping(root);
+    // Phase 6: style unfilled template labels as bold
+    await phaseStyleTemplateLabels(root);
     return analysis;
 }
 var debugLog = [];
