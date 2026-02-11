@@ -43,12 +43,14 @@ function getSkillPath(): string {
 function upsertMapping(
   mappings: Array<{ nodeName: string; value: string }>,
   nodeName: string,
-  value: string | null | undefined
+  value: string | null | undefined,
+  force?: boolean
 ): void {
   if (!value || !value.trim()) return
   const idx = mappings.findIndex((m) => m.nodeName === nodeName)
   if (idx >= 0) {
-    if (!mappings[idx].value || !mappings[idx].value.trim()) mappings[idx].value = value
+    // force: overwrite even if Claude already filled it (ensures verbatim doc content wins)
+    if (force || !mappings[idx].value || !mappings[idx].value.trim()) mappings[idx].value = value
     return
   }
   mappings.push({ nodeName, value })
@@ -66,8 +68,8 @@ function extractDocSection(doc: string, heading: string): string | null {
 interface VariantRow {
   id: 'A' | 'B' | 'C' | 'D'
   type?: string
-  visual?: string
-  copy?: string
+  visualDirection?: string
+  script?: string
 }
 
 function firstSentence(value: string | undefined): string | undefined {
@@ -86,32 +88,52 @@ function remainderAfterFirstSentence(value: string | undefined): string | undefi
   return match?.[1]?.trim() || undefined
 }
 
+/** Match start of a variant table row: |  A - Video | or | B - Video | */
+const ROW_START = /^\|\s*([A-D])\s*-\s*([^|]+)\|/i
+
+/**
+ * Parse the Variants markdown table with multi-line cells.
+ * Table format: | Variant | input visual + copy directions | Script |
+ * Rows start with | A - Video | and span multiple lines until the next row or empty row.
+ */
 function parseVariantTableRows(doc: string): VariantRow[] {
   const out: VariantRow[] = []
-  const lines = doc.split(/\r?\n/)
-  for (const raw of lines) {
-    const line = raw.trim()
-    if (!line) continue
+  // Find table body: after the | --- | --- | --- | separator
+  const sepMatch = doc.match(/\|\s*---\s*\|\s*---\s*\|\s*---\s*\|/)
+  if (!sepMatch || sepMatch.index === undefined) return out
+  const tableStart = sepMatch.index + sepMatch[0].length
+  const tableBody = doc.slice(tableStart)
 
-    // Markdown table style: | A | static | visual... | copy... |
-    const table = /^\|?\s*([A-D])\s*\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)\|?\s*$/i.exec(line)
-    if (table) {
-      out.push({
-        id: table[1].toUpperCase() as VariantRow['id'],
-        type: table[2].trim() || undefined,
-        visual: table[3].trim() || undefined,
-        copy: table[4].trim() || undefined,
-      })
+  const lines = tableBody.split(/\r?\n/)
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const rowStartMatch = ROW_START.exec(line)
+    if (!rowStartMatch) {
+      i++
       continue
     }
+    const id = rowStartMatch[1].toUpperCase() as VariantRow['id']
+    const typeCell = rowStartMatch[2].trim()
+    const typeLabel = typeCell || undefined
 
-    // Compact row style: "A - Video", "B: static"
-    const compact = /^([A-D])\s*[-:]\s*(.+)$/i.exec(line)
-    if (compact) {
-      out.push({
-        id: compact[1].toUpperCase() as VariantRow['id'],
-        type: compact[2].trim() || undefined,
-      })
+    const rowLines: string[] = [line]
+    i++
+    while (i < lines.length) {
+      const next = lines[i]
+      if (ROW_START.test(next) || /^\|\s*\|\s*\|\s*\|?\s*$/.test(next)) break
+      rowLines.push(next)
+      i++
+    }
+
+    const rowText = rowLines.join('\n')
+    const parts = rowText.split('|')
+    if (parts.length >= 4) {
+      const visualDirection = parts[2].trim() || undefined
+      const script = parts[3].trim() || undefined
+      out.push({ id, type: typeLabel, visualDirection, script })
+    } else {
+      out.push({ id, type: typeLabel })
     }
   }
   return out
@@ -147,21 +169,21 @@ function deterministicBackfill(
     const test = extractDocSection(mondayDocContent, 'Test')
     const variantRows = parseVariantTableRows(mondayDocContent)
 
-    upsertMapping(out.textMappings, 'IDEA:', idea ?? undefined)
-    upsertMapping(out.textMappings, 'WHY:', why ?? undefined)
+    // Force-overwrite all doc-sourced fields so verbatim Monday content always wins
+    // over Claude's potentially paraphrased version.
+    upsertMapping(out.textMappings, 'IDEA:', idea ?? undefined, true)
+    upsertMapping(out.textMappings, 'WHY:', why ?? undefined, true)
     if (audience) {
-      // Prefer rich audience details from the doc over plain region dropdown values.
-      upsertMapping(out.textMappings, 'AUDIENCE/REGION:', `AUDIENCE/REGION:\n${audience}`)
+      upsertMapping(out.textMappings, 'AUDIENCE/REGION:', `AUDIENCE/REGION:\n${audience}`, true)
       usedDocAudience = true
     }
-    upsertMapping(out.textMappings, 'FORMATS:', formats ?? undefined)
-    upsertMapping(out.textMappings, 'Product:', product ?? undefined)
-    // Visual and Copy info: content-only (no "Visual:" or "Copy info:" prefix); plugin writes to Specs placeholder.
+    upsertMapping(out.textMappings, 'FORMATS:', formats ?? undefined, true)
+    upsertMapping(out.textMappings, 'Product:', product ?? undefined, true)
     const visualContent = visual?.replace(/^visual\s*:\s*/i, '').trim() || undefined
     const copyInfoContent = copyInfo?.replace(/^copy\s+info\s*:\s*/i, '').trim() || undefined
-    upsertMapping(out.textMappings, 'Visual', visualContent)
-    upsertMapping(out.textMappings, 'Copy info:', copyInfoContent)
-    upsertMapping(out.textMappings, 'Test:', test ?? undefined)
+    upsertMapping(out.textMappings, 'Visual', visualContent, true)
+    upsertMapping(out.textMappings, 'Copy info:', copyInfoContent, true)
+    upsertMapping(out.textMappings, 'Test:', test ?? undefined, true)
 
     if (variants) {
       const firstLine = variants.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? variants.trim()
@@ -170,18 +192,20 @@ function deterministicBackfill(
       }
     }
 
-    // Variant rows from Monday table -> Briefing column variant blocks only (multi-line type + Visual + Copy).
-    // Do NOT map input data into Copy column Variation frames (those are for in-design copy only).
+    // Variant rows from Monday table -> Briefing column variant blocks.
+    // Use Monday column names as sub-headers: "Input visual + copy direction:" and "Script:".
+    // Only force-overwrite when we actually parsed content (not type-only).
     for (const row of variantRows) {
       const typeLabel = row.type ? `${row.id} - ${row.type}` : `${row.id} - Image`
-      const hasVisual = row.visual?.trim()
-      const hasCopy = row.copy?.trim()
+      const hasVisual = row.visualDirection?.trim()
+      const hasScript = row.script?.trim()
       const blockValue =
-        hasVisual || hasCopy
-          ? `${typeLabel}:\n${hasVisual ? `Visual: ${row.visual!.trim()}\n` : ''}${hasCopy ? `Copy: ${row.copy!.trim()}` : ''}`.trim()
+        hasVisual || hasScript
+          ? `${typeLabel}\n${hasVisual ? `Input visual + copy direction: ${row.visualDirection!.trim()}\n` : ''}${hasScript ? `Script: ${row.script!.trim()}` : ''}`.trim()
           : typeLabel
-      upsertMapping(out.textMappings, `${row.id} - Image`, blockValue)
-      upsertMapping(out.textMappings, `${row.id} - Image `, blockValue)
+      const hasContent = !!hasVisual || !!hasScript
+      upsertMapping(out.textMappings, `${row.id} - Image`, blockValue, hasContent)
+      upsertMapping(out.textMappings, `${row.id} - Image `, blockValue, hasContent)
     }
   }
 
@@ -264,10 +288,19 @@ export async function computeNodeMapping(
     mondayDocContent: options?.mondayDocContent ?? null,
   }
   const userMessage = `Map this Monday item and optional doc onto the template nodes.
-Important:
-- Fill variant rows A/B/C/D from Monday into the Briefing column variant blocks (A - Image, B - Image, etc.) as multi-line text: type line, then "Visual: ...", then "Copy: ...". Do NOT put this input data into the Copy column Variation frames — those are for final in-design copy only.
-- Map Briefing variant type labels (A - Image -> A - Static, etc.) and put the full variant block content (type + input visual + input copy) into those same nodes.
-- Only fill Copy column Variation frames (headline:/subline:/CTA:/Note:) when the Monday doc has explicit "in design copy" or script content for that variation.
+
+CRITICAL: Copy ALL text VERBATIM from the Monday doc. NEVER rewrite, paraphrase, summarize, or change any content. Every word must match the source exactly.
+
+Variant block structure (use these exact sub-headers — they are the Monday column names):
+- First line: variant type (e.g. "A - Video") from the Variant column.
+- Then "Input visual + copy direction: " followed by the verbatim text from the "input visual + copy directions" column.
+- Then "Script: " followed by the verbatim text from the Script column.
+
+Rules:
+- Fill variant rows A/B/C/D from Monday into the Briefing column variant blocks (A - Image, B - Image, etc.) using the structure above. Copy all text WORD FOR WORD.
+- Map Briefing variant type labels (A - Image -> A - Static, etc.) and put the full variant block into those same nodes.
+- Do NOT put this input data into the Copy column Variation frames — those are for final in-design copy only.
+- Only fill Copy column Variation frames (headline:/subline:/CTA:/Note:) when the Monday doc has explicit "in design copy" for that variation.
 Return only a single JSON object with keys "textMappings" and "frameRenames", no markdown or explanation.
 
 ${JSON.stringify(userPayload, null, 2)}`

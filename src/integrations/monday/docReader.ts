@@ -6,12 +6,27 @@
 
 import { mondayGraphql } from './client.js'
 
+type JsonObject = Record<string, unknown>
+
+function parseJsonObject(value: unknown): JsonObject | null {
+  if (!value || typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as JsonObject
+    }
+  } catch {
+    // ignore non-json strings
+  }
+  return null
+}
+
 /** Extract plain text from a block content (may be Delta JSON or string). */
 function blockToText(content: unknown): string {
   if (content == null) return ''
   if (typeof content === 'string') {
-    try {
-      const parsed = JSON.parse(content) as Record<string, unknown>
+    const parsed = parseJsonObject(content)
+    if (parsed) {
       if (Array.isArray(parsed.deltaFormat)) {
         return (parsed.deltaFormat as Array<{ insert?: string }>)
           .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
@@ -22,8 +37,8 @@ function blockToText(content: unknown): string {
           .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
           .join('')
       }
-    } catch {
-      // keep raw string
+      if (typeof parsed.text === 'string') return parsed.text
+      if (Array.isArray(parsed.cells)) return ''
     }
     return content
   }
@@ -43,6 +58,61 @@ function blockToText(content: unknown): string {
   return ''
 }
 
+function getTableCells(content: unknown): Array<Array<{ blockId?: string }>> | null {
+  if (content == null) return null
+  let obj: JsonObject | null = null
+  if (typeof content === 'string') {
+    obj = parseJsonObject(content)
+  } else if (typeof content === 'object' && !Array.isArray(content)) {
+    obj = content as JsonObject
+  }
+  if (!obj || !Array.isArray(obj.cells)) return null
+  return obj.cells as Array<Array<{ blockId?: string }>>
+}
+
+function isPureStyleJsonText(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false
+  const parsed = parseJsonObject(trimmed)
+  if (!parsed) return false
+  const keys = Object.keys(parsed)
+  if (!keys.length) return true
+  const styleKeys = new Set(['backgroundColor', 'alignment', 'direction', 'columnsStyle', 'width'])
+  return keys.every((k) => styleKeys.has(k))
+}
+
+function normalizeCellText(text: string): string {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim()
+}
+
+interface DocBlock {
+  id: string
+  type?: string
+  parent_block_id?: string | null
+  content?: unknown
+}
+
+function collectDescendantText(
+  parentId: string,
+  childrenByParent: Map<string, DocBlock[]>,
+  visited: Set<string>
+): string {
+  const children = childrenByParent.get(parentId) ?? []
+  const parts: string[] = []
+  for (const child of children) {
+    if (visited.has(child.id)) continue
+    visited.add(child.id)
+    const ownText = normalizeCellText(blockToText(child.content))
+    if (ownText && !isPureStyleJsonText(ownText)) parts.push(ownText)
+    const nested = collectDescendantText(child.id, childrenByParent, visited)
+    if (nested) parts.push(nested)
+  }
+  return parts.join('\n').trim()
+}
+
 /**
  * Fetch a Monday Doc by id and return its block content as a single string (for the mapping agent).
  * Returns null if token missing, doc not found, or API error (e.g. docs:read not granted).
@@ -56,7 +126,7 @@ export async function getDocContent(docId: string): Promise<string | null> {
     const objectId = Number(id)
     if (!Number.isFinite(objectId)) return null
 
-    const allBlocks: Array<{ id: string; type?: string; content?: unknown }> = []
+    const allBlocks: DocBlock[] = []
     let page = 1
     const limit = 100
     while (true) {
@@ -65,11 +135,7 @@ export async function getDocContent(docId: string): Promise<string | null> {
           id: string
           object_id?: string
           name?: string
-          blocks?: Array<{
-            id: string
-            type?: string
-            content?: unknown
-          }>
+          blocks?: DocBlock[]
         }>
       }>(
         `query ($objectIds: [ID!]!, $limit: Int!, $page: Int!) {
@@ -80,6 +146,7 @@ export async function getDocContent(docId: string): Promise<string | null> {
             blocks(limit: $limit, page: $page) {
               id
               type
+              parent_block_id
               content
             }
           }
@@ -95,10 +162,66 @@ export async function getDocContent(docId: string): Promise<string | null> {
     }
 
     if (!allBlocks.length) return null
+    const byId = new Map<string, DocBlock>()
+    for (const block of allBlocks) byId.set(block.id, block)
+    const childrenByParent = new Map<string, DocBlock[]>()
+    for (const block of allBlocks) {
+      const parentId = block.parent_block_id ? String(block.parent_block_id) : ''
+      if (!parentId) continue
+      const arr = childrenByParent.get(parentId) ?? []
+      arr.push(block)
+      childrenByParent.set(parentId, arr)
+    }
+
+    // Reconstruct table blocks from cell block references so variant rows stay aligned.
+    const tableMarkdownById = new Map<string, string>()
+    const consumedCellBlockIds = new Set<string>()
+    const consumedDescendantBlockIds = new Set<string>()
+    for (const block of allBlocks) {
+      const cells = getTableCells(block.content)
+      if (!cells || !cells.length) continue
+
+      const rows: string[] = []
+      for (let r = 0; r < cells.length; r++) {
+        const row = cells[r] ?? []
+        const values = row.map((cell) => {
+          const blockId = cell?.blockId ? String(cell.blockId) : ''
+          if (!blockId) return ''
+          consumedCellBlockIds.add(blockId)
+          const source = byId.get(blockId)
+          if (!source) return ''
+          const visited = new Set<string>()
+          const ownText = normalizeCellText(blockToText(source.content))
+          if (ownText && !isPureStyleJsonText(ownText)) visited.add(source.id)
+          const nestedText = collectDescendantText(source.id, childrenByParent, visited)
+          for (const id of visited) consumedDescendantBlockIds.add(id)
+          if (ownText && !isPureStyleJsonText(ownText)) {
+            return [ownText, nestedText].filter(Boolean).join('\n').trim()
+          }
+          return nestedText
+        })
+        rows.push(`| ${values.join(' | ')} |`)
+        if (r === 0) {
+          rows.push(`| ${values.map(() => '---').join(' | ')} |`)
+        }
+      }
+      const tableMarkdown = rows.join('\n').trim()
+      if (tableMarkdown) tableMarkdownById.set(block.id, tableMarkdown)
+    }
+
     const parts: string[] = []
     for (const block of allBlocks) {
-      const text = blockToText(block.content)
-      if (text) parts.push(text)
+      const tableMarkdown = tableMarkdownById.get(block.id)
+      if (tableMarkdown) {
+        parts.push(tableMarkdown)
+        continue
+      }
+      if (consumedCellBlockIds.has(block.id)) continue
+      if (consumedDescendantBlockIds.has(block.id)) continue
+      const text = blockToText(block.content).trim()
+      if (!text) continue
+      if (isPureStyleJsonText(text)) continue
+      parts.push(text)
     }
     return parts.length ? parts.join('\n\n') : null
   } catch {

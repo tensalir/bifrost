@@ -43,21 +43,23 @@ Only include entries for nodes you have data for; omit nodes with no source data
 
 ### Briefing column variant blocks (Monday input → designers)
 
-**Monday variant table data** (variant, type, input visual, input copy) must go into the **Briefing column** variant blocks only. Each Briefing variant block is a single text node named `A - Image`, `B - Image`, `C - Image`, or `D - Image`. Put the **full multi-line block** as the value:
+**Monday variant table data** (Variant, input visual + copy directions, Script) must go into the **Briefing column** variant blocks only. Each Briefing variant block is a single text node named `A - Image`, `B - Image`, `C - Image`, or `D - Image`. Put the **full multi-line block** as the value.
 
-Format:
+Format (use these exact sub-headers):
 ```
-{A} - {type}:
-Visual: {input visual}
-Copy: {input copy}
+{A} - {type}
+Input visual + copy direction: {verbatim visual-direction cell}
+Script: {verbatim script cell}
 ```
 
 Example value for node `A - Image`:
 ```
-A - Static:
-Visual: Shouting pub fan mid-rant, match blurred behind?
-Copy: You came for the match. Not drunk Dave's opinions.
-Hear what's important.
+A - Video
+Input visual + copy direction: Use this footage: https://...
+Script: Unlock better sleep with Loop Dream
+Featuring oval-shaped ear tips, designed to fit the ear's natural curve
+And powerful noise reduction for all-night comfort, even whilst side sleeping
+Wake up refreshed, over and over again, with Loop Dream
 ```
 
 - **Do NOT** put Monday variant table input into the Copy column. The Copy column Variation frames are for **in-design copy** (final headline/subline/CTA/Note) only.
@@ -71,12 +73,12 @@ Each "Variation A/B/C/D" frame in the **Copy** column contains: **in design copy
 
 | Node name | Semantic role |
 |-----------|---------------|
-| A - Image | Variant A: full block = type + Visual + Copy (multi-line) |
+| A - Image | Variant A: full block = type + Input visual + copy direction + Script |
 | B - Image | Variant B: full block |
-| C - Image \n | Variant C: full block |
-| D - Image  | Variant D: full block |
+| C - Image | Variant C: full block |
+| D - Image | Variant D: full block |
 
-Value = multi-line string as above (e.g. "A - Static:\nVisual: ...\nCopy: ...").
+Value = multi-line string as above (e.g. "A - Video\nInput visual + copy direction: ...\nScript: ...").
 
 ### Asset frames to rename
 
@@ -109,7 +111,12 @@ Item `name` is always the experiment name (Name EXP, and used in frame renames).
 1. **Label prefix**: For nodes like "AUDIENCE/REGION:", "SEGMENT: ALL", "IDEA:", keep the label and append or replace with the value. Example: "AUDIENCE/REGION: " + "All" → "AUDIENCE/REGION: All". For "Name EXP", replace entirely with the experiment name. **Exception:** For "Visual" and "Copy info:", provide **content-only** values (no "Visual:" or "Copy info:" prefix); the label stays in its own node and the plugin writes the value into the Specs placeholder.
 1b. **Audience preference**: If Monday Doc has an `Audience` section, use it for `AUDIENCE/REGION:` (multiline allowed). Only fall back to the Region dropdown when Audience section is missing.
 2. **Missing data**: If no source exists for a node, omit it from textMappings (do not invent content). For frame renames, always produce renames for NAME-EXP-* using the experiment name and variant/size.
-3. **Variants**: Map Monday variant table A/B/C/D into the **Briefing** column variant blocks (A - Image, B - Image, etc.) as multi-line text (type + Visual + Copy). Do NOT put this input into the Copy column — Copy column Variation frames are for in-design copy only.
+3. **Variants (strict row integrity)**:
+   - Map Monday variant table rows A/B/C/D into the **matching** Briefing variant blocks (A row -> A block, B row -> B block, etc.).
+   - Never move, combine, or borrow lines from another row.
+   - Copy each cell verbatim, including line breaks and parenthetical notes.
+   - Format block text as: type line, then `Input visual + copy direction:`, then `Script:`.
+   - Do NOT put this input into the Copy column; Copy column Variation frames are for in-design copy only.
 4. **Whitespace**: Preserve single spaces after colons where the template uses them (e.g. "headline: " + value).
 5. **Node name exact match**: The plugin matches by `node.name`. Use the exact string from the template (e.g. "headline:", "subline:", "CTA:", "Note:").
 

@@ -150,6 +150,12 @@ function buildTextCandidates(textNode) {
         candidates.add(name);
     if (chars)
         candidates.add(chars);
+    // So variant block "A - Image\nInput visual + copy direction:\nScript:" still matches key "A - Image"
+    if (chars && chars.includes('\n')) {
+        const firstLine = chars.split('\n')[0].trim();
+        if (firstLine)
+            candidates.add(firstLine);
+    }
     const path = getAncestorPath(textNode);
     if (path.length > 0) {
         const parent = path[path.length - 1];
@@ -375,7 +381,8 @@ function findSectionInsertionIndex(sectionName, allPages) {
 const TEMPLATE_FONT = { family: 'Inter', style: 'Regular' };
 const TEMPLATE_FONT_BOLD = { family: 'Inter', style: 'Bold' };
 const LABEL_FONT_SIZE = 14;
-const CONTENT_FONT_SIZE = 11;
+const SUB_LABEL_FONT_SIZE = 12;
+const CONTENT_FONT_SIZE = 12;
 function makeColumnFrame(name, width) {
     const frame = figma.createFrame();
     frame.name = name;
@@ -440,14 +447,24 @@ async function styleFilledContent(textNode) {
     textNode.setRangeFontName(0, len, TEMPLATE_FONT);
     textNode.setRangeFontSize(0, len, CONTENT_FONT_SIZE);
     textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: CONTENT_FONT_SIZE + 5 });
-    // Find label prefixes on each line and make them bold + larger.
-    // Pattern: up to 30 chars of label-like text ending with ':'
+    // Three-tier typography: primary labels (14px Bold), sub-headers (12px Bold), content (12px Regular).
+    const KNOWN_LABELS = /^(IDEA:|WHY:|AUDIENCE\/REGION:|SEGMENT:|FORMATS:|VARIANTS:|Product:|Visual:|Copy:|Copy info:|Note:|Test:|headline:|subline:|CTA:|[A-D]\s*-\s*(?:Video|Image|Static|Carousel|[A-Za-z]+):)/i;
+    const SUB_LABELS = /^(Input visual \+ copy direction:|Script:)/i;
     const lines = text.split('\n');
     let offset = 0;
     for (const line of lines) {
-        const m = /^([A-Za-z0-9\s/\-_&().]+:)/.exec(line);
-        if (m && m[1].length <= 30) {
-            const labelEnd = offset + m[1].length;
+        const subM = SUB_LABELS.exec(line);
+        const labelM = KNOWN_LABELS.exec(line);
+        if (subM) {
+            const labelEnd = offset + subM[1].length;
+            if (hasBold) {
+                textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD);
+            }
+            textNode.setRangeFontSize(offset, labelEnd, SUB_LABEL_FONT_SIZE);
+            textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: SUB_LABEL_FONT_SIZE + 5 });
+        }
+        else if (labelM) {
+            const labelEnd = offset + labelM[1].length;
             if (hasBold) {
                 textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD);
             }
@@ -478,6 +495,25 @@ async function styleTemplateLabel(textNode) {
     }
     textNode.setRangeFontSize(0, len, LABEL_FONT_SIZE);
     textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 });
+}
+/** Style unfilled sub-header labels (e.g. Input visual + copy direction:, Script:) as Bold 12px. */
+async function styleTemplateSubLabel(textNode) {
+    const text = textNode.characters;
+    if (!text || text.length === 0)
+        return;
+    try {
+        await figma.loadFontAsync(TEMPLATE_FONT);
+    }
+    catch (_) {
+        return;
+    }
+    const hasBold = await ensureBoldFont();
+    const len = text.length;
+    if (hasBold) {
+        textNode.setRangeFontName(0, len, TEMPLATE_FONT_BOLD);
+    }
+    textNode.setRangeFontSize(0, len, SUB_LABEL_FONT_SIZE);
+    textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: SUB_LABEL_FONT_SIZE + 5 });
 }
 function makeBlockFrame() {
     const frame = figma.createFrame();
@@ -595,9 +631,10 @@ async function createAutoLayoutTemplate() {
             }
             appendAndStretch(briefingCol, block);
         }
+        const variantPlaceholder = (letter) => `${letter} - Image\nInput visual + copy direction:\nScript:`;
         for (const letter of ['A', 'B', 'C', 'D']) {
             const block = makeBlockFrame();
-            const text = makeTextNode(`${letter} - Image`, `${letter} - Image`, font);
+            const text = makeTextNode(`${letter} - Image`, variantPlaceholder(letter), font);
             appendAndStretch(block, text);
             appendAndStretch(briefingCol, block);
         }
@@ -975,11 +1012,13 @@ const TEMPLATE_LABEL_PATTERNS = new Set([
     'briefing', 'not started', 'copy', 'design', 'uploads', 'frontify',
     'variation a', 'variation b', 'variation c', 'variation d',
     'in design copy', 'headline:', 'subline:', 'cta:', 'note:', 'variants',
+    'input visual + copy direction:', 'script:',
 ]);
+/** Sub-header labels that get Bold 12px when unfilled (variant block structure). */
+const TEMPLATE_SUB_LABELS = new Set(['input visual + copy direction:', 'script:']);
 /**
  * Phase 6: Style unfilled template labels as Bold + larger.
- * Text nodes that still contain their original short template text
- * (headers, section labels) get bold styling for visual hierarchy.
+ * Primary labels → 14px Bold; sub-headers (Input visual + copy direction:, Script:) → 12px Bold.
  */
 async function phaseStyleTemplateLabels(node) {
     let count = 0;
@@ -989,8 +1028,11 @@ async function phaseStyleTemplateLabels(node) {
         // Only style short template labels (not filled multi-line content)
         if (text.length > 0 && text.length <= 40 && !text.includes('\n')) {
             const lower = text.toLowerCase();
-            // Match known template labels or very short placeholder-like text
-            if (TEMPLATE_LABEL_PATTERNS.has(lower) || /^[A-D] - (image|video|static|carousel)$/i.test(text)) {
+            if (TEMPLATE_SUB_LABELS.has(lower)) {
+                await styleTemplateSubLabel(tn);
+                count++;
+            }
+            else if (TEMPLATE_LABEL_PATTERNS.has(lower) || /^[A-D] - (image|video|static|carousel)$/i.test(text)) {
                 await styleTemplateLabel(tn);
                 count++;
             }
