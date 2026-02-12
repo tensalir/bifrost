@@ -1,43 +1,82 @@
-# Bifrost
+# Bifrost - Monday to Figma Briefing Sync
 
-Monday → Figma experiment page automation. When a Monday item is moved to **Figma Ready**, Bifrost queues a sync job; opening the matching monthly Figma file and running the **Bifrost Sync** plugin creates a new page from the briefing template and fills it from Monday data.
+Automated Monday.com briefing to Figma template sync with admin dashboard.
 
-## Quick start
+## Quick Start
 
-1. **Backend** (webhook + job API)
-   ```bash
-   npm install
-   cp .env.example .env   # set MONDAY_API_TOKEN, optional FIGMA_ACCESS_TOKEN, BIFROST_BATCH_FILE_MAP
-   npm run dev
-   ```
-   Server: `http://localhost:3846`. Register `POST /webhooks/monday` with Monday.
-
-2. **Figma plugin**
-   - Build: `cd figma-plugin && npm install && npm run build`
-   - In Figma: Plugins → Development → Import plugin from manifest → select `figma-plugin/manifest.json`
-   - Open your monthly file (e.g. *MARCH 2026 - PerformanceAds*), run the plugin, set **API base** if needed (defaults to `http://localhost:3846`), click **Sync queued briefings**.
-
-3. **Template**
-   - One page in the file named **"Briefing Template to Duplicate"** (or "Briefing Template").
-   - On each text node to fill, set plugin data **bifrostId** to a placeholder (e.g. `bifrost:exp_name`, `bifrost:var_a_headline`). See [docs/template-setup.md](docs/template-setup.md).
-
-## Routing
-
-- Monday **batch** column + item `created_at` year (for month-only labels like "March") → canonical key `YYYY-MM` → expected Figma file name **MONTH YYYY - PerformanceAds**.
-- Optional env `BIFROST_BATCH_FILE_MAP` (JSON): map canonical key to Figma file key so the plugin can target the right file when multiple are open.
-
-## Verify
+### Development
 
 ```bash
-npx tsx src/scripts/verify-routing.ts
+npm install
+npm run dev        # Start Next.js admin panel (port 3846)
+npm run dev:backend  # Start legacy backend server (if needed)
 ```
 
-## Pilot
+### Production Deployment
 
-See [docs/pilot.md](docs/pilot.md) for a step-by-step pilot on one monthly file and board.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete Vercel deployment guide.
 
-## Layout
+## Architecture
 
-- `src/` – backend: config, domain (routing, briefing, template), integrations (Monday, Figma REST), jobs (queue), orchestration (createOrQueue, resolveFigmaTarget), API (server, webhooks).
-- `figma-plugin/` – plugin: `code.ts` → `code.js`, UI inline; syncs queued jobs and fills template by placeholder IDs.
-- `docs/` – template setup and pilot runbook.
+- **Backend**: Next.js API routes (replaces raw HTTP server)
+- **Frontend**: Next.js App Router with shadcn/ui + Loop-Vesper design system
+- **Storage**: Vercel KV (Redis) for job queue, settings, webhook logs
+- **Auth**: HTTP Basic Auth (configurable via `ADMIN_PASSWORD`)
+- **Plugin**: Figma plugin for syncing queued briefings to canvas
+
+## Project Structure
+
+```
+app/                    # Next.js pages and API routes
+  api/                  # API route handlers
+  jobs/                 # Job browser page
+  queue/                # Manual queue page
+  routing/              # Routing map editor
+  settings/             # Settings page
+  page.tsx              # Dashboard
+  layout.tsx            # Root layout with nav
+lib/
+  kv.ts                 # Vercel KV persistence layer
+components/
+  ui/                   # shadcn/ui components
+  nav.tsx               # Sidebar navigation
+src/                    # Backend domain logic (unchanged)
+  agents/               # Claude mapping agent
+  domain/               # Briefing, routing logic
+  integrations/         # Monday, Figma clients
+  orchestration/        # createOrQueueFigmaPage
+figma-plugin/           # Figma plugin code
+```
+
+## Key Features
+
+- ✅ **Automatic Queueing**: Monday webhooks trigger job creation
+- ✅ **Manual Queue**: Admin panel for manual briefing queueing
+- ✅ **Figma Plugin**: Sync queued jobs to monthly files
+- ✅ **Idempotency**: Prevent duplicate page creation
+- ✅ **Routing Map**: Dynamic batch → file key mapping (stored in KV)
+- ✅ **Eligibility Filters**: Control which Monday items are synced
+- ✅ **Claude Mapping**: AI-powered field extraction from Monday Docs
+- ✅ **Admin Dashboard**: Queue stats, recent jobs, system health
+- ✅ **Persistent Storage**: Vercel KV (Redis) for job queue
+
+## Scripts
+
+- `npm run dev` - Start Next.js dev server
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run queue` - Test manual queueing
+- `npm run lint` - Run ESLint
+
+## Environment Variables
+
+See [.env.example](./.env.example) for required configuration.
+
+## Documentation
+
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - Vercel deployment guide
+- [.cursor/plans/](./. cursor/plans/) - Implementation plans
+
+## Support
+
+For issues or questions, check Vercel logs and the deployment guide.

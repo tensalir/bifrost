@@ -40,7 +40,7 @@ export function buildIdempotencyKey(mondayItemId: string, statusTransitionId?: s
  * V1: server path is disabled (REST cannot create pages); we always queue.
  * When nodeMapping/frameRenames are provided (from mapping agent), the plugin applies them by node name.
  */
-export function createOrQueueFigmaPage(
+export async function createOrQueueFigmaPage(
   briefing: BriefingDTO,
   options: {
     mondayBoardId: string
@@ -49,10 +49,10 @@ export function createOrQueueFigmaPage(
     nodeMapping?: Array<{ nodeName: string; value: string }>
     frameRenames?: Array<{ oldName: string; newName: string }>
   }
-): CreateOrQueueResult {
+): Promise<CreateOrQueueResult> {
   const idempotencyKey = options.idempotencyKey ?? buildIdempotencyKey(briefing.mondayItemId, options.statusTransitionId)
 
-  const existing = getJobByIdempotencyKey(idempotencyKey)
+  const existing = await getJobByIdempotencyKey(idempotencyKey)
   if (existing) {
     return {
       outcome: existing.state === 'completed' ? 'skipped' : 'queued',
@@ -96,7 +96,7 @@ export function createOrQueueFigmaPage(
     }
   }
 
-  const job = enqueuePendingSyncJob({
+  const job = await enqueuePendingSyncJob({
     idempotencyKey,
     mondayItemId: briefing.mondayItemId,
     mondayBoardId: options.mondayBoardId,

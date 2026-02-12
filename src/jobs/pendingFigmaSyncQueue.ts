@@ -1,18 +1,16 @@
 /**
- * In-memory pending Figma sync job queue.
+ * Pending Figma sync job queue - KV-backed persistent storage.
  * Plugin polls or fetches queued jobs for current file; backend enqueues on status change.
- * Can be replaced with DB/Redis for persistence.
  */
 
+import { enqueueJob, getJobByIdempotencyKey as kvGetJobByIdempotencyKey, updateJobState as kvUpdateJobState, getAllJobs, getJobsByFileKey, getJobsByBatch, getJobsByState } from '../../lib/kv.js'
 import type { PendingSyncJob, PendingSyncJobState } from './types.js'
 
 export type { PendingSyncJob, PendingSyncJobState }
 
-const store = new Map<string, PendingSyncJob>()
-
-export function enqueuePendingSyncJob(
+export async function enqueuePendingSyncJob(
   job: Omit<PendingSyncJob, 'id' | 'state' | 'createdAt' | 'updatedAt'>
-): PendingSyncJob {
+): Promise<PendingSyncJob> {
   const id = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   const now = new Date().toISOString()
   const full: PendingSyncJob = {
@@ -22,29 +20,31 @@ export function enqueuePendingSyncJob(
     createdAt: now,
     updatedAt: now,
   }
-  store.set(job.idempotencyKey, full)
+  await enqueueJob(full)
   return full
 }
 
-export function getAllPendingJobs(): PendingSyncJob[] {
-  return [...store.values()].filter((j) => j.state === 'queued')
+export async function getAllPendingJobs(): Promise<PendingSyncJob[]> {
+  const jobs = await getJobsByState('queued')
+  return jobs
 }
 
-export function getPendingJobsByFileKey(figmaFileKey: string): PendingSyncJob[] {
-  return [...store.values()].filter(
-    (j) => j.state === 'queued' && (j.figmaFileKey === figmaFileKey || !j.figmaFileKey)
-  )
+export async function getPendingJobsByFileKey(figmaFileKey: string): Promise<PendingSyncJob[]> {
+  const jobs = await getJobsByFileKey(figmaFileKey)
+  return jobs.filter((j) => j.state === 'queued')
 }
 
-export function getPendingJobsByBatchCanonical(batchCanonical: string): PendingSyncJob[] {
-  return [...store.values()].filter((j) => j.state === 'queued' && j.batchCanonical === batchCanonical)
+export async function getPendingJobsByBatchCanonical(batchCanonical: string): Promise<PendingSyncJob[]> {
+  const jobs = await getJobsByBatch(batchCanonical)
+  return jobs.filter((j) => j.state === 'queued')
 }
 
-export function getJobByIdempotencyKey(idempotencyKey: string): PendingSyncJob | undefined {
-  return store.get(idempotencyKey)
+export async function getJobByIdempotencyKey(idempotencyKey: string): Promise<PendingSyncJob | undefined> {
+  const job = await kvGetJobByIdempotencyKey(idempotencyKey)
+  return job ?? undefined
 }
 
-export function updateJobState(
+async function updateJobStateWrapper(
   idempotencyKey: string,
   update: {
     state: PendingSyncJobState
@@ -52,33 +52,29 @@ export function updateJobState(
     figmaFileUrl?: string | null
     errorCode?: string | null
   }
-): PendingSyncJob | undefined {
-  const job = store.get(idempotencyKey)
+): Promise<PendingSyncJob | undefined> {
+  const job = await kvGetJobByIdempotencyKey(idempotencyKey)
   if (!job) return undefined
-  const updated: PendingSyncJob = {
-    ...job,
-    ...update,
-    updatedAt: new Date().toISOString(),
-  }
-  store.set(idempotencyKey, updated)
-  return updated
+  await kvUpdateJobState(job.id, update.state, update)
+  const updated = await kvGetJobByIdempotencyKey(idempotencyKey)
+  return updated ?? undefined
 }
 
-export function markJobRunning(idempotencyKey: string): PendingSyncJob | undefined {
-  return updateJobState(idempotencyKey, { state: 'running' })
+export async function markJobRunning(idempotencyKey: string): Promise<PendingSyncJob | undefined> {
+  return updateJobStateWrapper(idempotencyKey, { state: 'running' })
 }
 
-export function markJobCompleted(
+export async function markJobCompleted(
   idempotencyKey: string,
   result: { figmaPageId: string; figmaFileUrl?: string }
-): PendingSyncJob | undefined {
-  return updateJobState(idempotencyKey, {
+): Promise<PendingSyncJob | undefined> {
+  return updateJobStateWrapper(idempotencyKey, {
     state: 'completed',
     figmaPageId: result.figmaPageId,
     figmaFileUrl: result.figmaFileUrl ?? null,
   })
 }
 
-export function markJobFailed(idempotencyKey: string, errorCode: string): PendingSyncJob | undefined {
-  return updateJobState(idempotencyKey, { state: 'failed', errorCode })
+export async function markJobFailed(idempotencyKey: string, errorCode: string): Promise<PendingSyncJob | undefined> {
+  return updateJobStateWrapper(idempotencyKey, { state: 'failed', errorCode })
 }

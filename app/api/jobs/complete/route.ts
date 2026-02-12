@@ -1,0 +1,52 @@
+import { NextResponse } from 'next/server'
+import { getJobByIdempotencyKey, updateJobState } from '@/lib/kv'
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json()
+    const idempotencyKey = String(body.idempotencyKey ?? body.idempotency_key ?? '')
+    const figmaPageId = String(body.figmaPageId ?? body.page_id ?? '')
+    const figmaFileUrl = String(body.figmaFileUrl ?? body.file_url ?? '')
+    
+    if (!idempotencyKey) {
+      return NextResponse.json({ error: 'idempotencyKey required' }, { status: 400 })
+    }
+    
+    const job = await getJobByIdempotencyKey(idempotencyKey)
+    if (!job) {
+      return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+    }
+    
+    await updateJobState(job.id, 'completed', { figmaPageId, figmaFileUrl })
+    
+    return NextResponse.json(
+      { ok: true, message: 'Job marked as completed' },
+      {
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      }
+    )
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  })
+}
+
+export const dynamic = 'force-dynamic'

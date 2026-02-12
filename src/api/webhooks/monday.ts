@@ -191,7 +191,7 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     }
   }
 
-  const result = createOrQueueFigmaPage(briefing, {
+  const result = await createOrQueueFigmaPage(briefing, {
     mondayBoardId: boardId,
     idempotencyKey,
     statusTransitionId: timestamp,
@@ -254,7 +254,7 @@ export async function queueMondayItem(
     }
   }
 
-  const result = createOrQueueFigmaPage(briefing, {
+  const result = await createOrQueueFigmaPage(briefing, {
     mondayBoardId: boardId,
     idempotencyKey,
     statusTransitionId: suffix,

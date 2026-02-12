@@ -122,7 +122,7 @@ async function main() {
 
   console.log(`\n=== Queueing Figma sync job ===\n`)
   const idempotencyKey = buildIdempotencyKey(ITEM_ID, 'test-run-' + Date.now())
-  const result = createOrQueueFigmaPage(briefing, {
+  const result = await createOrQueueFigmaPage(briefing, {
     mondayBoardId: BOARD_ID,
     idempotencyKey,
     nodeMapping,
