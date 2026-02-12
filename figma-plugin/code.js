@@ -1200,18 +1200,43 @@ async function processJobs(jobs) {
 var uiHtml = '<html><head><style>'
     + 'body{font-family:Inter,sans-serif;padding:12px;margin:0;}'
     + 'h3{margin:0 0 8px 0;font-size:13px;}'
+    + '.row{display:flex;gap:8px;align-items:center;margin:8px 0;}'
+    + '.label{font-size:11px;color:#555;min-width:68px;}'
+    + 'input{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;}'
     + 'button{padding:8px 16px;background:#0d99ff;color:#fff;border:none;border-radius:6px;cursor:pointer;width:100%;font-size:12px;}'
     + 'button:hover{background:#0b85e0;}'
+    + '.secondary{background:#fff;color:#333;border:1px solid #ddd;width:auto;padding:6px 10px;}'
+    + '.secondary:hover{background:#f6f6f6;}'
     + '#msg{font-size:11px;color:#666;margin-top:8px;min-height:20px;}'
     + '.err{color:#f24822;}'
     + '</style></head><body>'
     + '<h3>Bifrost Sync</h3>'
+    + '<div class="row"><span class="label">API base</span><input id="api-base" placeholder="http://localhost:3846" /><button class="secondary" id="save-api">Save</button></div>'
     + '<p id="msg">Sync queued briefings from Monday into this file.</p>'
     + '<button id="sync">Sync queued briefings</button>'
     + '<button id="create-template" style="margin-top:8px;">Create Auto-Layout Template</button>'
     + '<script>'
-    + 'var BIFROST_API = "http://localhost:3846";'
+    + 'var DEFAULT_BIFROST_API = "http://localhost:3846";'
+    + 'var BIFROST_API = DEFAULT_BIFROST_API;'
     + 'var fileKey = "";'
+    + 'function sanitizeApiBase(raw) {'
+    + '  var v = (raw || "").trim();'
+    + '  if (!v) return DEFAULT_BIFROST_API;'
+    + '  return v.replace(/\\/$/, "");'
+    + '}'
+    + 'function setApiBase(raw) {'
+    + '  BIFROST_API = sanitizeApiBase(raw);'
+    + '  var input = document.getElementById("api-base");'
+    + '  if (input) input.value = BIFROST_API;'
+    + '}'
+    + 'document.getElementById("save-api").onclick = function() {'
+    + '  var input = document.getElementById("api-base");'
+    + '  setApiBase(input ? input.value : "");'
+    + '  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: BIFROST_API } }, "*");'
+    + '  var el = document.getElementById("msg");'
+    + '  el.textContent = "Saved API base: " + BIFROST_API;'
+    + '  el.className = "";'
+    + '};'
     + 'document.getElementById("sync").onclick = function() {'
     + '  document.getElementById("msg").textContent = "Fetching queued jobs...";'
     + '  document.getElementById("msg").className = "";'
@@ -1268,6 +1293,7 @@ var uiHtml = '<html><head><style>'
     + '  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;'
     + '  if (d.type === "file-key") fetchJobs(d.fileKey);'
     + '  if (d.type === "jobs-processed") reportResults(d.results);'
+    + '  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_BIFROST_API);'
     + '  if (d.type === "create-template-done") {'
     + '    var el = document.getElementById("msg");'
     + '    el.textContent = d.error ? "Template error: " + d.error : "Template created. You can now sync briefings.";'
@@ -1282,9 +1308,22 @@ var uiHtml = '<html><head><style>'
     + '    el.textContent = d.text;'
     + '  }'
     + '};'
+    + 'parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");'
     + '</script></body></html>';
 figma.showUI(uiHtml, { width: 500, height: 500 });
 figma.ui.onmessage = async function (msg) {
+    var _a;
+    if (msg.type === 'get-api-base') {
+        const saved = await figma.clientStorage.getAsync('bifrostApiBase');
+        const apiBase = typeof saved === 'string' && saved.trim() ? saved.trim() : 'http://localhost:3846';
+        figma.ui.postMessage({ type: 'api-base', apiBase });
+    }
+    if (msg.type === 'save-api-base') {
+        const raw = (_a = msg.apiBase) !== null && _a !== void 0 ? _a : '';
+        const apiBase = raw.trim().replace(/\/$/, '') || 'http://localhost:3846';
+        await figma.clientStorage.setAsync('bifrostApiBase', apiBase);
+        figma.ui.postMessage({ type: 'api-base', apiBase });
+    }
     if (msg.type === 'get-file-key') {
         figma.ui.postMessage({ type: 'file-key', fileKey: figma.fileKey || '' });
     }

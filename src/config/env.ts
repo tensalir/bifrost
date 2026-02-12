@@ -10,6 +10,12 @@ const envSchema = z.object({
   MONDAY_SIGNING_SECRET: z.string().min(1).optional(),
   MONDAY_BOARD_ID: z.string().optional(),
   MONDAY_STATUS_FIGMA_READY: z.string().optional(),
+  /** Optional strict eligibility gate for webhook queueing. */
+  MONDAY_ENFORCE_FILTERS: z.enum(['true', 'false', '1', '0', '']).optional(),
+  /** CSV allowlist for status values (e.g. "ready for review,brief ready / approved"). */
+  MONDAY_ALLOWED_STATUS_VALUES: z.string().optional(),
+  /** CSV allowlist for assignment/team values (e.g. "studio,content creation"). */
+  MONDAY_ALLOWED_TEAM_VALUES: z.string().optional(),
   FIGMA_ACCESS_TOKEN: z.string().min(1).optional(),
   FIGMA_TEMPLATE_FILE_KEY: z.string().optional(),
   /** JSON map of canonical month key (e.g. "2026-03") to Figma file key. */

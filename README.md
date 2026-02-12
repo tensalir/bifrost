@@ -15,7 +15,7 @@ Monday → Figma experiment page automation. When a Monday item is moved to **Fi
 2. **Figma plugin**
    - Build: `cd figma-plugin && npm install && npm run build`
    - In Figma: Plugins → Development → Import plugin from manifest → select `figma-plugin/manifest.json`
-   - Open your monthly file (e.g. *MARCH 2026 - PerformanceAds*), run the plugin, click **Sync queued briefings**.
+   - Open your monthly file (e.g. *MARCH 2026 - PerformanceAds*), run the plugin, set **API base** if needed (defaults to `http://localhost:3846`), click **Sync queued briefings**.
 
 3. **Template**
    - One page in the file named **"Briefing Template to Duplicate"** (or "Briefing Template").
@@ -23,7 +23,7 @@ Monday → Figma experiment page automation. When a Monday item is moved to **Fi
 
 ## Routing
 
-- Monday **batch** column (e.g. "MARCH 2026") → canonical key `2026-03` → expected Figma file name **MARCH 2026 - PerformanceAds**.
+- Monday **batch** column + item `created_at` year (for month-only labels like "March") → canonical key `YYYY-MM` → expected Figma file name **MONTH YYYY - PerformanceAds**.
 - Optional env `BIFROST_BATCH_FILE_MAP` (JSON): map canonical key to Figma file key so the plugin can target the right file when multiple are open.
 
 ## Verify

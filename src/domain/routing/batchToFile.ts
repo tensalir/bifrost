@@ -21,11 +21,19 @@ export interface BatchParseResult {
   month: number
 }
 
+function isValidYear(year: number): boolean {
+  return Number.isInteger(year) && year >= 2000 && year <= 2100
+}
+
 /**
  * Parse batch string (e.g. "MARCH 2026", "Mar 2026", "2026-03") into canonical key and expected file name.
+ * When the batch only contains month text ("March"), pass yearHint to force deterministic year routing.
  * Returns null if unparseable.
  */
-export function parseBatchToCanonical(batch: string | null | undefined): BatchParseResult | null {
+export function parseBatchToCanonical(
+  batch: string | null | undefined,
+  yearHint?: number
+): BatchParseResult | null {
   const raw = typeof batch === 'string' ? batch.trim() : ''
   if (!raw) return null
 
@@ -93,7 +101,8 @@ export function parseBatchToCanonical(batch: string | null | undefined): BatchPa
     }
   }
 
-  // Month name only (no year): "March", "Mar", "MARCH" → infer year from current date
+  // Month name only (no year): "March", "Mar", "MARCH"
+  // Prefer explicit year hint from source system (e.g. Monday item created_at year).
   const monthOnly = raw.toUpperCase().trim()
   let monthIndex = MONTH_NAMES.findIndex((m) => m === monthOnly || m.startsWith(monthOnly))
   if (monthIndex === -1) {
@@ -101,11 +110,16 @@ export function parseBatchToCanonical(batch: string | null | undefined): BatchPa
     monthIndex = MONTH_ABBREV.findIndex((m) => m === abbrev)
   }
   if (monthIndex >= 0) {
-    const now = new Date()
-    const currentMonth = now.getMonth() // 0-based
-    const currentYear = now.getFullYear()
-    // If the batch month is before the current month, assume next year
-    const y = monthIndex < currentMonth ? currentYear + 1 : currentYear
+    let y: number
+    if (isValidYear(yearHint ?? NaN)) {
+      y = yearHint as number
+    } else {
+      const now = new Date()
+      const currentMonth = now.getMonth() // 0-based
+      const currentYear = now.getFullYear()
+      // Backward-compatible fallback when source year is unavailable.
+      y = monthIndex < currentMonth ? currentYear + 1 : currentYear
+    }
     const m = monthIndex + 1
     const monthName = MONTH_NAMES[monthIndex]
     return {

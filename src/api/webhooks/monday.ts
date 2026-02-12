@@ -25,12 +25,28 @@ export interface MondayWebhookPayload {
   value?: unknown
 }
 
+function isEnabled(v: string | undefined): boolean {
+  return v === 'true' || v === '1'
+}
+
+function parseCsvLower(input: string | undefined): string[] {
+  return String(input ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function normalizeText(v: string | null | undefined): string {
+  return String(v ?? '').trim().toLowerCase()
+}
+
 /** Fetch single item by board + item id. Uses Monday API v2 column_values schema. */
 export async function getMondayItem(boardId: string, itemId: string): Promise<MondayItem | null> {
   const data = await mondayGraphql<{
     items?: Array<{
       id: string
       name: string
+      created_at?: string
       column_values: Array<{
         id: string
         text: string | null
@@ -44,6 +60,7 @@ export async function getMondayItem(boardId: string, itemId: string): Promise<Mo
       items(ids: $ids) {
         id
         name
+        created_at
         column_values {
           id
           text
@@ -60,6 +77,7 @@ export async function getMondayItem(boardId: string, itemId: string): Promise<Mo
   return {
     id: raw.id,
     name: raw.name,
+    created_at: raw.created_at ?? undefined,
     column_values: raw.column_values.map((cv) => ({
       id: cv.id,
       title: cv.column.title,
@@ -123,6 +141,28 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     return { received: true, error: 'Item not found' }
   }
 
+  const col = columnMap(item)
+  const enforceFilters = isEnabled(env.MONDAY_ENFORCE_FILTERS)
+  if (enforceFilters) {
+    const allowedStatuses = parseCsvLower(env.MONDAY_ALLOWED_STATUS_VALUES)
+    if (allowedStatuses.length === 0) {
+      allowedStatuses.push(normalizeText(statusFigmaReady))
+    }
+    const allowedTeams = parseCsvLower(env.MONDAY_ALLOWED_TEAM_VALUES)
+
+    const statusValue = normalizeText(getCol(col, 'status'))
+    const teamValue = normalizeText(
+      getCol(col, 'creation_team', 'creative_team', 'assigned_team', 'team', 'assignee_team')
+    )
+
+    if (!statusValue || !allowedStatuses.includes(statusValue)) {
+      return { received: true, message: `Ignored: status "${statusValue || '-'}" not eligible` }
+    }
+    if (allowedTeams.length > 0 && (!teamValue || !allowedTeams.includes(teamValue))) {
+      return { received: true, message: `Ignored: team "${teamValue || '-'}" not eligible` }
+    }
+  }
+
   const briefing = mondayItemToBriefing(item)
   if (!briefing) {
     return { received: true, message: 'Batch missing or unparseable' }
@@ -138,7 +178,6 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     try {
       const tree = await getTemplateNodeTree(target.figmaFileKey)
       let mondayDocContent: string | null = null
-      const col = columnMap(item)
       const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
       const docId = getDocIdFromColumnValue(briefRaw ?? null)
       if (docId) mondayDocContent = await getDocContent(docId)

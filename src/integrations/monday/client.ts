@@ -16,6 +16,7 @@ export interface MondayColumnValue {
 export interface MondayItem {
   id: string
   name: string
+  created_at?: string
   column_values?: MondayColumnValue[]
 }
 

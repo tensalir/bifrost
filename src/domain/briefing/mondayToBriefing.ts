@@ -86,7 +86,9 @@ function parseVariants(col: Record<string, string | number | null>): VariantBloc
 export function mondayItemToBriefing(item: MondayItem): BriefingDTO | null {
   const col = columnMap(item)
   const batchRaw = getCol(col, 'batch', 'batch_name')
-  const batchParse = batchRaw ? parseBatchToCanonical(batchRaw) : null
+  const createdYear = item.created_at ? new Date(item.created_at).getUTCFullYear() : undefined
+  const yearHint = Number.isFinite(createdYear) ? createdYear : undefined
+  const batchParse = batchRaw ? parseBatchToCanonical(batchRaw, yearHint) : null
   const batchCanonical = batchParse?.canonicalKey ?? ''
 
   if (!batchCanonical) return null
