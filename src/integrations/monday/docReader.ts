@@ -5,6 +5,7 @@
  */
 
 import { mondayGraphql } from './client.js'
+import type { MondayImageAttachment } from './client.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -259,6 +260,86 @@ export async function getDocContent(docId: string): Promise<string | null> {
     return parts.length ? parts.join('\n\n') : null
   } catch {
     return null
+  }
+}
+
+/**
+ * Extract image URLs from Monday Doc blocks.
+ * Looks for blocks with type "image" and extracts their src/url from content.
+ * Returns MondayImageAttachment[] for images found in the doc.
+ */
+export async function getDocImages(docId: string): Promise<MondayImageAttachment[]> {
+  if (!docId.trim()) return []
+  const id = docId.trim().replace(/^doc_/i, '')
+  if (!id) return []
+
+  try {
+    const objectId = Number(id)
+    if (!Number.isFinite(objectId)) return []
+
+    const allBlocks: DocBlock[] = []
+    let page = 1
+    const limit = 100
+    while (true) {
+      const data = await mondayGraphql<{
+        docs?: Array<{
+          id: string
+          blocks?: DocBlock[]
+        }>
+      }>(
+        `query ($objectIds: [ID!]!, $limit: Int!, $page: Int!) {
+          docs(object_ids: $objectIds) {
+            id
+            blocks(limit: $limit, page: $page) {
+              id
+              type
+              content
+            }
+          }
+        }`,
+        { objectIds: [objectId], limit, page }
+      )
+      const doc = data?.docs?.[0]
+      const blocks = doc?.blocks ?? []
+      if (!blocks.length) break
+      allBlocks.push(...blocks)
+      if (blocks.length < limit) break
+      page += 1
+    }
+
+    const images: MondayImageAttachment[] = []
+    for (const block of allBlocks) {
+      const blockType = (block.type ?? '').toLowerCase()
+      if (blockType !== 'image' && blockType !== 'file') continue
+
+      // Image block content may be JSON with src/url/fileId fields
+      let content: Record<string, unknown> | null = null
+      if (typeof block.content === 'string') {
+        content = parseJsonObject(block.content)
+      } else if (typeof block.content === 'object' && block.content !== null) {
+        content = block.content as Record<string, unknown>
+      }
+      if (!content) continue
+
+      // Try common URL fields in Monday Doc image blocks
+      const url =
+        (typeof content.src === 'string' && content.src) ||
+        (typeof content.url === 'string' && content.url) ||
+        (typeof content.publicUrl === 'string' && content.publicUrl) ||
+        (typeof content.public_url === 'string' && content.public_url) ||
+        null
+      if (!url) continue
+
+      const name =
+        (typeof content.name === 'string' && content.name) ||
+        (typeof content.fileName === 'string' && content.fileName) ||
+        `doc-image-${block.id}`
+
+      images.push({ url, name, source: 'doc' })
+    }
+    return images
+  } catch {
+    return []
   }
 }
 

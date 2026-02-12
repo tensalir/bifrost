@@ -21,6 +21,8 @@ export interface PendingSyncJob {
   nodeMapping?: Array<{ nodeName: string; value: string }>
   /** Pre-computed frame renames (e.g. NAME-EXP-4x5 → {experimentName}-A-4x5) */
   frameRenames?: Array<{ oldName: string; newName: string }>
+  /** Image attachments from Monday file columns / briefing doc; plugin fetches & imports into Figma */
+  images?: Array<{ url: string; name: string; source: string }>
   state: PendingSyncJobState
   createdAt: string
   updatedAt: string

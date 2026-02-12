@@ -48,6 +48,7 @@ export async function createOrQueueFigmaPage(
     statusTransitionId?: string
     nodeMapping?: Array<{ nodeName: string; value: string }>
     frameRenames?: Array<{ oldName: string; newName: string }>
+    images?: Array<{ url: string; name: string; source: string }>
   }
 ): Promise<CreateOrQueueResult> {
   const idempotencyKey = options.idempotencyKey ?? buildIdempotencyKey(briefing.mondayItemId, options.statusTransitionId)
@@ -96,6 +97,15 @@ export async function createOrQueueFigmaPage(
     }
   }
 
+  // Merge images from briefing DTO and explicit options (dedup by URL)
+  const allImages = [...(briefing.images ?? []), ...(options.images ?? [])]
+  const seenUrls = new Set<string>()
+  const dedupImages = allImages.filter((img) => {
+    if (seenUrls.has(img.url)) return false
+    seenUrls.add(img.url)
+    return true
+  })
+
   const job = await enqueuePendingSyncJob({
     idempotencyKey,
     mondayItemId: briefing.mondayItemId,
@@ -107,6 +117,7 @@ export async function createOrQueueFigmaPage(
     briefingPayload: briefing,
     nodeMapping: options.nodeMapping,
     frameRenames: options.frameRenames,
+    images: dedupImages.length > 0 ? dedupImages : undefined,
   })
 
   return {

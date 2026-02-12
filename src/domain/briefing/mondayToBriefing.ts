@@ -3,10 +3,10 @@
  * Uses column IDs or normalized title keys (batch, idea, audience, variants, etc.).
  */
 
-import type { MondayItem } from '../../integrations/monday/client.js'
-import { columnMap, getCol } from '../../integrations/monday/client.js'
+import type { MondayItem, MondayImageAttachment } from '../../integrations/monday/client.js'
+import { columnMap, getCol, extractImageAttachments } from '../../integrations/monday/client.js'
 import { parseBatchToCanonical } from '../routing/batchToFile.js'
-import type { BriefingDTO, VariantBlock } from './schema.js'
+import type { BriefingDTO, BriefingImage, VariantBlock } from './schema.js'
 
 const VARIANT_IDS = ['A', 'B', 'C', 'D'] as const
 
@@ -80,10 +80,19 @@ function parseVariants(col: Record<string, string | number | null>): VariantBloc
   return blocks
 }
 
+/** Convert MondayImageAttachment to BriefingImage (drop assetId). */
+function toBriefingImages(attachments: MondayImageAttachment[]): BriefingImage[] {
+  return attachments.map((a) => ({ url: a.url, name: a.name, source: a.source }))
+}
+
 /**
  * Map Monday item to BriefingDTO. Requires batch and item name.
+ * Pass docImages if you've already extracted images from the Monday Doc.
  */
-export function mondayItemToBriefing(item: MondayItem): BriefingDTO | null {
+export function mondayItemToBriefing(
+  item: MondayItem,
+  options?: { docImages?: MondayImageAttachment[] }
+): BriefingDTO | null {
   const col = columnMap(item)
   const batchRaw = getCol(col, 'batch', 'batch_name')
   const createdYear = item.created_at ? new Date(item.created_at).getUTCFullYear() : undefined
@@ -95,6 +104,12 @@ export function mondayItemToBriefing(item: MondayItem): BriefingDTO | null {
 
   const variants = parseVariants(col)
   const sectionName = extractSectionName(col, item.name)
+
+  // Extract images from file columns and item assets
+  const columnImages = extractImageAttachments(item)
+  const docImages = options?.docImages ?? []
+  const allImages = toBriefingImages([...columnImages, ...docImages])
+
   return {
     mondayItemId: item.id,
     experimentName: item.name,
@@ -107,5 +122,6 @@ export function mondayItemToBriefing(item: MondayItem): BriefingDTO | null {
     formats: getCol(col, 'formats', 'format') ?? undefined,
     variants,
     linkForReview: getCol(col, 'link_for_review', 'figma_link') ?? undefined,
+    images: allImages.length > 0 ? allImages : undefined,
   }
 }

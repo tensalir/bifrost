@@ -494,10 +494,11 @@ function makeColumnHeader(title, width, includeStatus, statusSet) {
     header.counterAxisSizingMode = 'AUTO';
     header.counterAxisAlignItems = 'CENTER';
     header.primaryAxisAlignItems = 'SPACE_BETWEEN';
-    header.paddingLeft = 16 * S;
-    header.paddingRight = 16 * S;
-    header.paddingTop = 10 * S;
-    header.paddingBottom = 10 * S;
+    header.itemSpacing = 16 * S;
+    header.paddingLeft = 20 * S;
+    header.paddingRight = 20 * S;
+    header.paddingTop = 14 * S;
+    header.paddingBottom = 14 * S;
     header.cornerRadius = 8 * S;
     header.fills = [solidPaint(0.16, 0.17, 0.2)];
     header.strokes = [solidPaint(0.3, 0.32, 0.36)];
@@ -514,6 +515,8 @@ function makeColumnHeader(title, width, includeStatus, statusSet) {
     if (includeStatus && statusSet) {
         const instance = statusSet.defaultVariant.createInstance();
         instance.name = `${title} Status`;
+        // Scale the instance up so the chip text is readable at column scale
+        instance.rescale(1.2);
         const defs = statusSet.componentPropertyDefinitions;
         const variantProp = Object.keys(defs).find((k) => defs[k].type === 'VARIANT');
         const options = variantProp ? defs[variantProp].variantOptions : undefined;
@@ -707,11 +710,12 @@ async function createAutoLayoutTemplate() {
         section.appendChild(row);
         const statusContainer = figma.createFrame();
         statusContainer.name = 'Bifrost Status Chips';
-        statusContainer.x = -10000;
-        statusContainer.y = -10000;
         statusContainer.fills = [];
         statusContainer.clipsContent = false;
         templatePage.appendChild(statusContainer);
+        // Position to the left of the template with a small gap
+        statusContainer.x = -(400 * S);
+        statusContainer.y = 0;
         let statusSet = null;
         try {
             statusSet = createStatusChipComponentSet(statusContainer);
@@ -887,6 +891,30 @@ async function createAutoLayoutTemplate() {
         }
         const { wrapper: uploadsWrapper, body: uploadsCol } = makeColumnWithHeader('Uploads', uploadsW, false);
         row.appendChild(uploadsWrapper);
+        // Image gallery block: receives images from Monday briefing attachments.
+        // The plugin's image import system finds this frame by name and places images here.
+        const uploadsGallery = figma.createFrame();
+        uploadsGallery.name = 'Uploads Gallery';
+        uploadsGallery.layoutMode = 'VERTICAL';
+        uploadsGallery.primaryAxisSizingMode = 'AUTO';
+        uploadsGallery.counterAxisSizingMode = 'FIXED';
+        uploadsGallery.counterAxisAlignItems = 'MIN';
+        uploadsGallery.itemSpacing = 8 * S;
+        uploadsGallery.paddingTop = uploadsGallery.paddingBottom = 8 * S;
+        uploadsGallery.paddingLeft = uploadsGallery.paddingRight = 8 * S;
+        uploadsGallery.fills = [solidPaint(0.97, 0.97, 0.97)];
+        uploadsGallery.strokes = [solidPaint(0.88, 0.89, 0.92)];
+        uploadsGallery.strokeWeight = Math.max(1, S / 2);
+        uploadsGallery.cornerRadius = 6 * S;
+        uploadsGallery.clipsContent = false;
+        uploadsGallery.resize(uploadsW, 60 * S);
+        appendAndStretch(uploadsCol, uploadsGallery);
+        // Placeholder text — removed automatically when images are imported
+        const uploadsPlaceholder = makeTextNode('Uploads Placeholder', 'Images from Monday will appear here', font);
+        uploadsPlaceholder.fontSize = 10 * S;
+        uploadsPlaceholder.fills = [solidPaint(0.6, 0.6, 0.6)];
+        appendAndStretch(uploadsGallery, uploadsPlaceholder);
+        // Legacy Frontify link block (kept for manual use)
         let uploadsBlock = makeBlockFrame();
         appendAndStretch(uploadsCol, uploadsBlock);
         appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font));
@@ -1255,6 +1283,153 @@ async function normalizeLayout(root) {
     return analysis;
 }
 var debugLog = [];
+// =====================================================
+// Image Import System
+// =====================================================
+// After text sync, images from Monday briefings are imported
+// into the "Uploads" column of each experiment page.
+// Flow: main thread → "fetch-images" → UI iframe fetches bytes
+//       UI → "image-data" → main thread places in Figma
+// =====================================================
+/**
+ * Find the image target frame in the "Uploads" column.
+ * New templates: looks for "Uploads Gallery" frame (dedicated image container).
+ * Old templates: falls back to the column body frame (second child of "Uploads Column").
+ */
+function findUploadsBody(page) {
+    let gallery = null;
+    let columnBody = null;
+    function walk(node) {
+        var _a, _b;
+        if (node.type === 'FRAME') {
+            const frame = node;
+            const name = frame.name.toLowerCase();
+            // Prefer the dedicated gallery frame (new templates)
+            if (name === 'uploads gallery') {
+                gallery = frame;
+                return;
+            }
+            // Fallback: find column body in "Uploads Column" wrapper (old templates)
+            if (name === 'uploads column' || name === 'uploads') {
+                if (frame.children && frame.children.length >= 2) {
+                    const body = frame.children[1];
+                    if (body.type === 'FRAME')
+                        columnBody = body;
+                }
+                if (!columnBody) {
+                    for (let i = 0; i < ((_b = (_a = frame.children) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0); i++) {
+                        const child = frame.children[i];
+                        if (child.type === 'FRAME' && !child.name.toLowerCase().includes('header')) {
+                            columnBody = child;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        const container = node;
+        if (container.children) {
+            for (let i = 0; i < container.children.length; i++) {
+                walk(container.children[i]);
+                if (gallery)
+                    return; // found the best target, stop
+            }
+        }
+    }
+    walk(page);
+    return gallery !== null && gallery !== void 0 ? gallery : columnBody;
+}
+/**
+ * Place a single image into the Uploads column body frame.
+ * Creates a rectangle with the image as fill, sized to fit the column width.
+ */
+async function placeImageInUploads(uploadsBody, imageBytes, imageName) {
+    try {
+        const image = figma.createImage(imageBytes);
+        const rect = figma.createRectangle();
+        rect.name = imageName || 'Briefing Image';
+        // Size to fit the uploads column width with appropriate aspect ratio
+        const columnWidth = uploadsBody.width > 0 ? uploadsBody.width : 260;
+        const thumbHeight = Math.round(columnWidth * 0.6); // Default 3:5 aspect
+        rect.resize(columnWidth, thumbHeight);
+        // Apply the image as a fill
+        rect.fills = [{
+                type: 'IMAGE',
+                imageHash: image.hash,
+                scaleMode: 'FIT',
+            }];
+        // Add corner radius for a cleaner look
+        rect.cornerRadius = 4;
+        uploadsBody.appendChild(rect);
+        try {
+            rect.layoutAlign = 'STRETCH';
+        }
+        catch (_) { }
+        return true;
+    }
+    catch (e) {
+        console.error('Failed to place image:', imageName, e);
+        return false;
+    }
+}
+/**
+ * Import images into a page's Uploads column.
+ * Called after image bytes are received from the UI iframe.
+ */
+async function importImagesToPage(pageId, images) {
+    const page = figma.getNodeById(pageId);
+    if (!page || page.type !== 'PAGE')
+        return 0;
+    const uploadsBody = findUploadsBody(page);
+    if (!uploadsBody) {
+        console.warn('No Uploads column found in page:', page.name);
+        return 0;
+    }
+    // Remove placeholder content before placing images.
+    // Handles both new template ("Images from Monday will appear here")
+    // and old template ("Frontify") placeholders.
+    const PLACEHOLDER_PATTERNS = ['frontify', 'images from monday', 'uploads placeholder'];
+    for (let i = uploadsBody.children.length - 1; i >= 0; i--) {
+        const child = uploadsBody.children[i];
+        if (child.type === 'TEXT') {
+            const text = child.characters.toLowerCase();
+            if (PLACEHOLDER_PATTERNS.some((p) => text.includes(p))) {
+                child.remove();
+            }
+        }
+        else if (child.type === 'FRAME') {
+            // Check nested block frames for placeholder text
+            const block = child;
+            let hasOnlyPlaceholder = true;
+            for (let j = block.children.length - 1; j >= 0; j--) {
+                const nested = block.children[j];
+                if (nested.type === 'TEXT') {
+                    const text = nested.characters.toLowerCase();
+                    if (PLACEHOLDER_PATTERNS.some((p) => text.includes(p))) {
+                        nested.remove();
+                    }
+                    else {
+                        hasOnlyPlaceholder = false;
+                    }
+                }
+                else {
+                    hasOnlyPlaceholder = false;
+                }
+            }
+            // Remove empty block frames left after placeholder removal
+            if (hasOnlyPlaceholder && block.children.length === 0) {
+                block.remove();
+            }
+        }
+    }
+    let placed = 0;
+    for (const img of images) {
+        const ok = await placeImageInUploads(uploadsBody, img.bytes, img.name);
+        if (ok)
+            placed++;
+    }
+    return placed;
+}
 async function processJobs(jobs) {
     debugLog = [];
     var root = figma.root;
@@ -1463,6 +1638,40 @@ var uiHtml = '<html><head><style>'
     + '    el.className = failed.length ? "err" : "";'
     + '  });'
     + '}'
+    + 'function fetchAllImages(images) {'
+    + '  var el = document.getElementById("msg");'
+    + '  el.textContent = "Fetching " + images.length + " image(s) from Monday...";'
+    + '  el.className = "";'
+    + '  var results = [];'
+    + '  var done = 0;'
+    + '  var errors = 0;'
+    + '  function next(i) {'
+    + '    if (i >= images.length) {'
+    + '      el.textContent = "Images fetched: " + (done - errors) + " ok, " + errors + " failed. Importing...";'
+    + '      parent.postMessage({ pluginMessage: { type: "images-fetched", images: results, imageCount: images.length } }, "*");'
+    + '      return;'
+    + '    }'
+    + '    var img = images[i];'
+    + '    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;'
+    + '    fetch(img.url)'
+    + '      .then(function(r) {'
+    + '        if (!r.ok) throw new Error("HTTP " + r.status);'
+    + '        return r.arrayBuffer();'
+    + '      })'
+    + '      .then(function(buf) {'
+    + '        results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });'
+    + '        done++;'
+    + '        next(i + 1);'
+    + '      })'
+    + '      .catch(function(err) {'
+    + '        console.warn("Image fetch failed:", img.url, err);'
+    + '        errors++;'
+    + '        done++;'
+    + '        next(i + 1);'
+    + '      });'
+    + '  }'
+    + '  next(0);'
+    + '}'
     + 'onmessage = function(e) {'
     + '  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;'
     + '  if (d.type === "file-key") fetchJobs(d.fileKey);'
@@ -1472,6 +1681,14 @@ var uiHtml = '<html><head><style>'
     + '    var el = document.getElementById("msg");'
     + '    el.textContent = d.error ? "Template error: " + d.error : "Template created. You can now sync briefings.";'
     + '    el.className = d.error ? "err" : "";'
+    + '  }'
+    + '  if (d.type === "fetch-images" && d.images && d.images.length > 0) {'
+    + '    fetchAllImages(d.images);'
+    + '  }'
+    + '  if (d.type === "images-import-done") {'
+    + '    var el = document.getElementById("msg");'
+    + '    var prev = el.textContent || "";'
+    + '    el.textContent = prev + " | Images: " + d.placed + "/" + d.total + " placed in Figma.";'
     + '  }'
     + '  if (d.type === "debug-log") {'
     + '    var el = document.getElementById("msg");'
@@ -1486,7 +1703,7 @@ var uiHtml = '<html><head><style>'
     + '</script></body></html>';
 figma.showUI(uiHtml, { width: 500, height: 500 });
 figma.ui.onmessage = async function (msg) {
-    var _a;
+    var _a, _b;
     if (msg.type === 'get-api-base') {
         const saved = await figma.clientStorage.getAsync('bifrostApiBase');
         const apiBase = typeof saved === 'string' && saved.trim() ? saved.trim() : 'http://localhost:3846';
@@ -1524,5 +1741,59 @@ figma.ui.onmessage = async function (msg) {
         }
         figma.ui.postMessage({ type: 'debug-log', text: summary });
         console.log(summary);
+        // Phase 2: Collect image import requests from successful jobs
+        var imageRequests = [];
+        for (var ji = 0; ji < msg.jobs.length; ji++) {
+            var job = msg.jobs[ji];
+            if (!job.images || job.images.length === 0)
+                continue;
+            // Find the matching result that succeeded
+            var matchResult = null;
+            for (var ri = 0; ri < results.length; ri++) {
+                if (results[ri].idempotencyKey === job.idempotencyKey && !results[ri].error) {
+                    matchResult = results[ri];
+                    break;
+                }
+            }
+            if (!matchResult || !matchResult.pageId)
+                continue;
+            for (var ii = 0; ii < job.images.length; ii++) {
+                imageRequests.push({
+                    url: job.images[ii].url,
+                    name: job.images[ii].name,
+                    pageId: matchResult.pageId,
+                });
+            }
+        }
+        if (imageRequests.length > 0) {
+            figma.ui.postMessage({ type: 'fetch-images', images: imageRequests });
+        }
+    }
+    // Handle image bytes received from UI after fetching
+    if (msg.type === 'images-fetched' && msg.images) {
+        var totalPlaced = 0;
+        // Group images by pageId
+        var byPage = {};
+        for (var idx = 0; idx < msg.images.length; idx++) {
+            var imgData = msg.images[idx];
+            if (!imgData.bytes || imgData.bytes.length === 0)
+                continue;
+            if (!byPage[imgData.pageId])
+                byPage[imgData.pageId] = [];
+            byPage[imgData.pageId].push({
+                bytes: new Uint8Array(imgData.bytes),
+                name: imgData.name,
+            });
+        }
+        var pageIds = Object.keys(byPage);
+        for (var pi = 0; pi < pageIds.length; pi++) {
+            var placed = await importImagesToPage(pageIds[pi], byPage[pageIds[pi]]);
+            totalPlaced += placed;
+        }
+        figma.ui.postMessage({
+            type: 'images-import-done',
+            placed: totalPlaced,
+            total: (_b = msg.imageCount) !== null && _b !== void 0 ? _b : msg.images.length,
+        });
     }
 };

@@ -13,11 +13,30 @@ export interface MondayColumnValue {
   type?: string
 }
 
+/** Image/file attachment extracted from Monday file columns or item assets. */
+export interface MondayImageAttachment {
+  url: string
+  name: string
+  /** Asset ID in Monday (for deduplication) */
+  assetId?: string
+  /** Source: which column or 'doc' */
+  source: string
+}
+
 export interface MondayItem {
   id: string
   name: string
   created_at?: string
   column_values?: MondayColumnValue[]
+  /** File assets attached to the item (from file columns, updates, etc.) */
+  assets?: Array<{
+    id: string
+    name: string
+    url?: string
+    public_url?: string
+    file_extension?: string
+    file_size?: number
+  }>
 }
 
 function getMondayToken(): string | null {
@@ -76,4 +95,65 @@ export function getCol(col: Record<string, string | number | null>, ...keys: str
     if (v != null && String(v).trim() !== '') return String(v).trim()
   }
   return null
+}
+
+/**
+ * Extract image attachments from a Monday item.
+ * Uses item.assets (queried via GraphQL) for public_url, cross-referenced
+ * with file-type column values for context (which column the file came from).
+ */
+export function extractImageAttachments(item: MondayItem): MondayImageAttachment[] {
+  const images: MondayImageAttachment[] = []
+  const seenUrls = new Set<string>()
+
+  // Strategy 1: Use item.assets which have public_url (preferred - long-lived URLs)
+  if (item.assets?.length) {
+    const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'tiff'])
+    for (const asset of item.assets) {
+      const ext = (asset.file_extension ?? '').toLowerCase().replace(/^\./, '')
+      if (!IMAGE_EXTENSIONS.has(ext)) continue
+      const url = asset.public_url ?? asset.url
+      if (!url) continue
+      if (seenUrls.has(url)) continue
+      seenUrls.add(url)
+      images.push({
+        url,
+        name: asset.name || `image-${asset.id}.${ext}`,
+        assetId: asset.id,
+        source: 'asset',
+      })
+    }
+  }
+
+  // Strategy 2: Parse file-type column values for asset IDs we may have missed
+  for (const col of item.column_values ?? []) {
+    if (col.type !== 'file' && col.type !== 'files') continue
+    if (!col.value) continue
+    try {
+      const parsed = JSON.parse(col.value) as Record<string, unknown>
+      const files = Array.isArray(parsed.files) ? parsed.files : []
+      for (const file of files as Array<Record<string, unknown>>) {
+        if (file.isImage !== 'true' && file.isImage !== true) continue
+        // If we already got this from item.assets, skip
+        const assetId = file.assetId != null ? String(file.assetId) : undefined
+        if (assetId && images.some((img) => img.assetId === assetId)) continue
+        // Some file entries include a direct URL
+        const url = typeof file.url === 'string' ? file.url : undefined
+        if (!url) continue
+        if (seenUrls.has(url)) continue
+        seenUrls.add(url)
+        const colTitle = col.title ?? col.id
+        images.push({
+          url,
+          name: typeof file.name === 'string' ? file.name : `file-${assetId}`,
+          assetId,
+          source: colTitle,
+        })
+      }
+    } catch {
+      // Not valid JSON, skip
+    }
+  }
+
+  return images
 }

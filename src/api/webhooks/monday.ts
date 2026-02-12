@@ -10,7 +10,7 @@ import { createOrQueueFigmaPage, buildIdempotencyKey } from '../../orchestration
 import { resolveFigmaTarget } from '../../orchestration/resolveFigmaTarget.js'
 import { getTemplateNodeTree } from '../../integrations/figma/templateCache.js'
 import { computeNodeMapping } from '../../agents/mappingAgent.js'
-import { getDocContent, getDocIdFromColumnValue } from '../../integrations/monday/docReader.js'
+import { getDocContent, getDocIdFromColumnValue, getDocImages } from '../../integrations/monday/docReader.js'
 import { columnMap, getCol } from '../../integrations/monday/client.js'
 
 export interface MondayWebhookPayload {
@@ -54,6 +54,14 @@ export async function getMondayItem(boardId: string, itemId: string): Promise<Mo
         type: string
         column: { title: string }
       }>
+      assets?: Array<{
+        id: string
+        name: string
+        url?: string
+        public_url?: string
+        file_extension?: string
+        file_size?: number
+      }>
     }>
   }>(
     `query ($ids: [ID!]!) {
@@ -67,6 +75,14 @@ export async function getMondayItem(boardId: string, itemId: string): Promise<Mo
           value
           type
           column { title }
+        }
+        assets {
+          id
+          name
+          url
+          public_url
+          file_extension
+          file_size
         }
       }
     }`,
@@ -85,6 +101,7 @@ export async function getMondayItem(boardId: string, itemId: string): Promise<Mo
       value: cv.value,
       type: cv.type,
     })),
+    assets: raw.assets,
   } as MondayItem
 }
 
@@ -163,7 +180,15 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     }
   }
 
-  const briefing = mondayItemToBriefing(item)
+  // Extract doc images alongside doc content
+  const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
+  const docId = getDocIdFromColumnValue(briefRaw ?? null)
+  let docImages: Awaited<ReturnType<typeof getDocImages>> = []
+  if (docId) {
+    try { docImages = await getDocImages(docId) } catch { /* ignore */ }
+  }
+
+  const briefing = mondayItemToBriefing(item, { docImages })
   if (!briefing) {
     return { received: true, message: 'Batch missing or unparseable' }
   }
@@ -178,8 +203,6 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     try {
       const tree = await getTemplateNodeTree(target.figmaFileKey)
       let mondayDocContent: string | null = null
-      const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
-      const docId = getDocIdFromColumnValue(briefRaw ?? null)
       if (docId) mondayDocContent = await getDocContent(docId)
       const mapping = await computeNodeMapping(item, tree, {
         mondayDocContent: mondayDocContent ?? undefined,
@@ -226,7 +249,16 @@ export async function queueMondayItem(
     return { outcome: 'failed', message: 'Item not found', error: 'Item not found' }
   }
 
-  const briefing = mondayItemToBriefing(item)
+  // Extract doc images alongside doc content
+  const qCol = columnMap(item)
+  const qBriefRaw = getCol(qCol, 'brief', 'briefing', 'doc')
+  const qDocId = getDocIdFromColumnValue(qBriefRaw ?? null)
+  let qDocImages: Awaited<ReturnType<typeof getDocImages>> = []
+  if (qDocId) {
+    try { qDocImages = await getDocImages(qDocId) } catch { /* ignore */ }
+  }
+
+  const briefing = mondayItemToBriefing(item, { docImages: qDocImages })
   if (!briefing) {
     return { outcome: 'failed', message: 'Batch missing or unparseable', error: 'Batch missing' }
   }
@@ -240,10 +272,7 @@ export async function queueMondayItem(
   if (target?.figmaFileKey) {
     try {
       const tree = await getTemplateNodeTree(target.figmaFileKey)
-      const col = columnMap(item)
-      const briefRaw = getCol(col, 'brief', 'briefing', 'doc')
-      const docId = getDocIdFromColumnValue(briefRaw ?? null)
-      const mondayDocContent = docId ? await getDocContent(docId) : null
+      const mondayDocContent = qDocId ? await getDocContent(qDocId) : null
       const mapping = await computeNodeMapping(item, tree, {
         mondayDocContent: mondayDocContent ?? undefined,
       })

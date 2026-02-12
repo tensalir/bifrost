@@ -3,6 +3,14 @@
  * Lock to column IDs in production; display names are for UX only.
  */
 
+/** Image attachment from Monday briefing (file column, doc, or item asset). */
+export interface BriefingImage {
+  url: string
+  name: string
+  /** Where it came from: column title, 'doc', 'asset' */
+  source: string
+}
+
 export interface BriefingDTO {
   mondayItemId: string
   /** Experiment code + short title, e.g. EXP-LM177.ChooseYourLoop-Mix-Productfocus */
@@ -25,6 +33,8 @@ export interface BriefingDTO {
   variants: VariantBlock[]
   /** Optional link for review / Figma URL once created */
   linkForReview?: string
+  /** Image attachments from Monday file columns and/or briefing doc */
+  images?: BriefingImage[]
 }
 
 export interface VariantBlock {
