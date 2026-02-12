@@ -58,7 +58,8 @@ function upsertMapping(
 
 function extractDocSection(doc: string, heading: string): string | null {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const rx = new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\n([\\s\\S]*?)(?=\\n\\s*[A-Z][A-Za-z ]*\\s*\\n|$)`, 'i')
+  // Match ## heading followed by content until next ## heading or end
+  const rx = new RegExp(`(?:^|\\n)##\\s*${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s*[A-Za-z]|$)`, 'i')
   const match = rx.exec(doc)
   if (!match?.[1]) return null
   const text = match[1].trim()
@@ -287,30 +288,45 @@ export async function computeNodeMapping(
     templateNodeTree,
     mondayDocContent: options?.mondayDocContent ?? null,
   }
-  const userMessage = `Map this Monday item and optional doc onto the template nodes.
+  const userMessage = `Map this Monday item and Monday briefing doc onto the Figma template nodes.
 
-CRITICAL: Copy ALL text VERBATIM from the Monday doc. NEVER rewrite, paraphrase, summarize, or change any content. Every word must match the source exactly.
+TASK: Extract ALL sections and content from the Monday doc (marked with ## headings, - bullets, [x] checklists) and map them to the corresponding Figma template text nodes. The doc uses markdown-like structure where:
+- ## marks section headings (Idea, Why, Audience, Product, Visual, Copy info, etc.)
+- - marks bullet list items
+- [x] / [ ] mark checklist items
+- Tables are formatted as | Variant | input visual | Script |
+
+CRITICAL RULES:
+1. Copy ALL text VERBATIM from the Monday doc. NEVER rewrite, paraphrase, summarize, or change any content. Every word must match the source exactly.
+2. Extract COMPLETE sections including ALL nested bullets and sub-items. If a section has 5 bullet points, include all 5.
+3. Reason through the doc structure step-by-step to ensure you capture every field.
 
 Variant block structure (use these exact sub-headers — they are the Monday column names):
 - First line: variant type (e.g. "A - Video") from the Variant column.
 - Then "Input visual + copy direction: " followed by the verbatim text from the "input visual + copy directions" column.
 - Then "Script: " followed by the verbatim text from the Script column.
 
-Rules:
+Mapping rules:
 - Fill variant rows A/B/C/D from Monday into the Briefing column variant blocks (A - Image, B - Image, etc.) using the structure above. Copy all text WORD FOR WORD.
 - Map Briefing variant type labels (A - Image -> A - Static, etc.) and put the full variant block into those same nodes.
 - Do NOT put this input data into the Copy column Variation frames — those are for final in-design copy only.
 - Only fill Copy column Variation frames (headline:/subline:/CTA:/Note:) when the Monday doc has explicit "in design copy" for that variation.
-Return only a single JSON object with keys "textMappings" and "frameRenames", no markdown or explanation.
+
+OUTPUT: Return only a single JSON object with keys "textMappings" and "frameRenames", no markdown or explanation.
 
 ${JSON.stringify(userPayload, null, 2)}`
 
   try {
     const client = new Anthropic({ apiKey })
+    const thinkingBudget = Number(process.env.ANTHROPIC_THINKING_BUDGET) || 10000
     const response = await client.messages.create({
       model: MAPPING_MODEL,
-      max_tokens: 4096,
-      system: skillContent || 'You are a mapping agent. Return only valid JSON with textMappings and frameRenames.',
+      max_tokens: 16000,
+      thinking: {
+        type: 'enabled',
+        budget_tokens: thinkingBudget,
+      },
+      system: skillContent || 'You are a mapping agent that reasons through Monday doc structure to extract all content. Return only valid JSON with textMappings and frameRenames.',
       messages: [{ role: 'user', content: userMessage }],
     })
 

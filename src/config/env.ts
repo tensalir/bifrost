@@ -24,6 +24,8 @@ const envSchema = z.object({
   BIFROST_DRY_RUN: z.enum(['true', 'false', '1', '0', '']).optional(),
   /** Claude API key for mapping agent; omit to use column-only fallback. */
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  /** Extended thinking budget for mapping agent (default 10000). */
+  ANTHROPIC_THINKING_BUDGET: z.string().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

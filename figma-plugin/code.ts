@@ -413,9 +413,24 @@ function findSectionInsertionIndex(sectionName: string, allPages: readonly PageN
 
 const TEMPLATE_FONT = { family: 'Inter', style: 'Regular' }
 const TEMPLATE_FONT_BOLD = { family: 'Inter', style: 'Bold' }
-const LABEL_FONT_SIZE = 14
-const SUB_LABEL_FONT_SIZE = 12
-const CONTENT_FONT_SIZE = 12
+
+/**
+ * Uniform scale factor for the entire template.
+ * 1 = original 2400px layout. 4 = ~9600px (comfortable working size).
+ */
+const S = 4
+
+const LABEL_FONT_SIZE = 14 * S
+const SUB_LABEL_FONT_SIZE = 12 * S
+const CONTENT_FONT_SIZE = 12 * S
+
+function solidPaint(r: number, g: number, b: number): SolidPaint {
+  return { type: 'SOLID', color: { r, g, b } }
+}
+
+function applyTextColor(text: TextNode, r: number, g: number, b: number): void {
+  text.fills = [solidPaint(r, g, b)]
+}
 
 function makeColumnFrame(name: string, width: number): FrameNode {
   const frame = figma.createFrame()
@@ -425,9 +440,12 @@ function makeColumnFrame(name: string, width: number): FrameNode {
   frame.primaryAxisSizingMode = 'AUTO'
   frame.counterAxisSizingMode = 'FIXED'
   frame.counterAxisAlignItems = 'MIN'
-  frame.itemSpacing = 8
-  frame.paddingTop = frame.paddingBottom = frame.paddingLeft = frame.paddingRight = 16
-  frame.fills = [{ type: 'SOLID', color: { r: 0.96, g: 0.96, b: 0.96 } }]
+  frame.itemSpacing = 8 * S
+  frame.paddingTop = frame.paddingBottom = frame.paddingLeft = frame.paddingRight = 16 * S
+  if (name === 'Briefing') frame.fills = [solidPaint(0.94, 0.95, 0.97)]
+  else if (name === 'Copy') frame.fills = [solidPaint(0.94, 0.94, 0.96)]
+  else if (name === 'Design') frame.fills = [solidPaint(0.93, 0.94, 0.95)]
+  else frame.fills = [solidPaint(0.95, 0.95, 0.95)]
   frame.clipsContent = false
   return frame
 }
@@ -436,11 +454,126 @@ function makeTextNode(name: string, placeholder: string, font: FontName): TextNo
   const text = figma.createText()
   text.name = name
   text.fontName = font
-  text.fontSize = 13
-  text.lineHeight = { unit: 'PIXELS', value: 18 }
+  text.fontSize = 13 * S
+  text.lineHeight = { unit: 'PIXELS', value: 18 * S }
   text.characters = placeholder
   text.textAutoResize = 'HEIGHT'
   return text
+}
+
+const STATUS_OPTIONS = [
+  'Not Started',
+  'In Progress',
+  'Amends Needed',
+  'Ready to Review',
+  'Approved',
+  'On Hold',
+] as const
+
+/** Build a single status chip frame with given label (for use as variant content). */
+function makeStatusChipFrame(label: string): FrameNode {
+  const chip = figma.createFrame()
+  chip.name = label
+  chip.layoutMode = 'HORIZONTAL'
+  chip.primaryAxisSizingMode = 'AUTO'
+  chip.counterAxisSizingMode = 'AUTO'
+  chip.counterAxisAlignItems = 'CENTER'
+  chip.paddingLeft = 10 * S
+  chip.paddingRight = 10 * S
+  chip.paddingTop = 4 * S
+  chip.paddingBottom = 4 * S
+  chip.cornerRadius = 999
+  chip.itemSpacing = 4 * S
+  chip.fills = [solidPaint(0.29, 0.3, 0.33)]
+  chip.strokes = [solidPaint(0.5, 0.52, 0.57)]
+  chip.strokeWeight = Math.max(1, S / 2)
+  chip.clipsContent = false
+
+  const text = figma.createText()
+  text.name = 'Label'
+  text.fontName = TEMPLATE_FONT_BOLD as FontName
+  text.fontSize = 11 * S
+  text.lineHeight = { unit: 'PIXELS', value: 14 * S }
+  text.characters = label.toUpperCase()
+  text.textAutoResize = 'WIDTH_AND_HEIGHT'
+  text.textTruncation = 'DISABLED' as any
+  applyTextColor(text, 1, 1, 1)
+  chip.appendChild(text)
+  return chip
+}
+
+/**
+ * Create a native Figma component set with Status variant (Not Started, In Progress, etc.),
+ * place it in a hidden container on the page, and return the set for creating instances.
+ */
+function createStatusChipComponentSet(container: FrameNode): ComponentSetNode {
+  const components: ComponentNode[] = []
+  for (const label of STATUS_OPTIONS) {
+    const frame = makeStatusChipFrame(label)
+    container.appendChild(frame)
+    const component = figma.createComponentFromNode(frame)
+    component.name = `Status=${label}`
+    components.push(component)
+  }
+  const set = figma.combineAsVariants(components, container, 0)
+  set.name = 'Bifrost Status Chip'
+  set.layoutMode = 'VERTICAL'
+  set.primaryAxisSizingMode = 'AUTO'
+  set.counterAxisSizingMode = 'AUTO'
+  set.itemSpacing = 8 * S
+  set.paddingTop = set.paddingBottom = set.paddingLeft = set.paddingRight = 8 * S
+  return set
+}
+
+function makeColumnHeader(
+  title: string,
+  width: number,
+  includeStatus: boolean,
+  statusSet: ComponentSetNode | null
+): FrameNode {
+  const header = figma.createFrame()
+  header.name = `${title} Header`
+  header.resize(width, 64 * S)
+  header.layoutMode = 'HORIZONTAL'
+  header.primaryAxisSizingMode = 'FIXED'
+  header.counterAxisSizingMode = 'AUTO'
+  header.counterAxisAlignItems = 'CENTER'
+  header.primaryAxisAlignItems = 'SPACE_BETWEEN'
+  header.paddingLeft = 16 * S
+  header.paddingRight = 16 * S
+  header.paddingTop = 10 * S
+  header.paddingBottom = 10 * S
+  header.cornerRadius = 8 * S
+  header.fills = [solidPaint(0.16, 0.17, 0.2)]
+  header.strokes = [solidPaint(0.3, 0.32, 0.36)]
+  header.strokeWeight = Math.max(1, S / 2)
+  header.clipsContent = false
+
+  const titleText = figma.createText()
+  titleText.name = `${title} Title`
+  titleText.fontName = TEMPLATE_FONT_BOLD as FontName
+  titleText.fontSize = 18 * S
+  titleText.characters = title.toUpperCase()
+  titleText.textAutoResize = 'WIDTH_AND_HEIGHT'
+  applyTextColor(titleText, 1, 1, 1)
+  header.appendChild(titleText)
+
+  if (includeStatus && statusSet) {
+    const instance = statusSet.defaultVariant.createInstance()
+    instance.name = `${title} Status`
+    const defs = statusSet.componentPropertyDefinitions
+    const variantProp = Object.keys(defs).find((k) => defs[k].type === 'VARIANT')
+    const options = variantProp ? defs[variantProp].variantOptions : undefined
+    const notStartedValue =
+      options?.includes('Not Started')
+        ? 'Not Started'
+        : options?.[0]
+    if (variantProp && notStartedValue) {
+      instance.setProperties({ [variantProp]: notStartedValue })
+    }
+    header.appendChild(instance)
+  }
+  return header
 }
 
 /** Track whether Bold font loaded successfully. */
@@ -549,10 +682,13 @@ function makeBlockFrame(): FrameNode {
   frame.primaryAxisSizingMode = 'AUTO'
   frame.counterAxisSizingMode = 'FIXED'
   frame.counterAxisAlignItems = 'MIN'
-  frame.itemSpacing = 8
-  frame.paddingTop = frame.paddingBottom = 8
-  frame.paddingLeft = frame.paddingRight = 12
-  frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]
+  frame.itemSpacing = 8 * S
+  frame.paddingTop = frame.paddingBottom = 8 * S
+  frame.paddingLeft = frame.paddingRight = 12 * S
+  frame.fills = [solidPaint(1, 1, 1)]
+  frame.strokes = [solidPaint(0.88, 0.89, 0.92)]
+  frame.strokeWeight = Math.max(1, S / 2)
+  frame.cornerRadius = 6 * S
   frame.clipsContent = false
   return frame
 }
@@ -593,11 +729,11 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   section.primaryAxisSizingMode = 'AUTO'
   section.counterAxisSizingMode = 'FIXED'
   section.counterAxisAlignItems = 'MIN'
-  section.itemSpacing = 12
-  section.paddingTop = section.paddingBottom = section.paddingLeft = section.paddingRight = 24
+  section.itemSpacing = 12 * S
+  section.paddingTop = section.paddingBottom = section.paddingLeft = section.paddingRight = 24 * S
   section.fills = []
   section.clipsContent = false
-  section.resize(2400, 100)
+  section.resize(2400 * S, 100)
   templatePage.appendChild(section)
 
   const row = figma.createFrame()
@@ -606,18 +742,58 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   row.primaryAxisSizingMode = 'AUTO'
   row.counterAxisSizingMode = 'AUTO'
   row.counterAxisAlignItems = 'MIN'
-  row.itemSpacing = 40
+  row.itemSpacing = 40 * S
   row.paddingTop = row.paddingBottom = row.paddingLeft = row.paddingRight = 0
   row.fills = []
   row.clipsContent = false
   section.appendChild(row)
 
-  const colW = 400
-  const briefingCol = makeColumnFrame('Briefing', colW)
-  row.appendChild(briefingCol)
+  const statusContainer = figma.createFrame()
+  statusContainer.name = 'Bifrost Status Chips'
+  statusContainer.x = -10000
+  statusContainer.y = -10000
+  statusContainer.fills = []
+  statusContainer.clipsContent = false
+  templatePage.appendChild(statusContainer)
+
+  let statusSet: ComponentSetNode | null = null
+  try {
+    statusSet = createStatusChipComponentSet(statusContainer)
+  } catch (_) {
+    statusSet = null
+  }
+
+  /** Wrap a header + column body into one vertical container. */
+  function makeColumnWithHeader(title: string, width: number, includeStatus: boolean): { wrapper: FrameNode; body: FrameNode } {
+    const wrapper = figma.createFrame()
+    wrapper.name = `${title} Column`
+    wrapper.layoutMode = 'VERTICAL'
+    wrapper.primaryAxisSizingMode = 'AUTO'
+    wrapper.counterAxisSizingMode = 'FIXED'
+    wrapper.counterAxisAlignItems = 'MIN'
+    wrapper.itemSpacing = 8 * S
+    wrapper.fills = []
+    wrapper.clipsContent = false
+    wrapper.resize(width, 100)
+
+    const header = makeColumnHeader(title, width, includeStatus, statusSet)
+    wrapper.appendChild(header)
+    try { (header as any).layoutAlign = 'STRETCH' } catch (_) {}
+
+    const body = makeColumnFrame(title, width)
+    wrapper.appendChild(body)
+    try { (body as any).layoutAlign = 'STRETCH' } catch (_) {}
+
+    return { wrapper, body }
+  }
+
+  const colW = 400 * S
+  const designW = 900 * S
+  const uploadsW = 280 * S
+
+  const { wrapper: briefingWrapper, body: briefingCol } = makeColumnWithHeader('Briefing', colW, true)
+  row.appendChild(briefingWrapper)
   const briefingBlocks = [
-    { label: 'Briefing', value: 'Briefing' },
-    { label: 'Not Started', value: 'Not Started' },
     { label: 'Name EXP', value: 'EXP-NAME' },
     { label: 'IDEA:', value: 'IDEA:' },
     { label: 'WHY:', value: 'WHY:' },
@@ -632,6 +808,16 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     { label: 'Test: -', value: 'Test: -' },
     { label: 'VARIANTS', value: 'VARIANTS' },
   ]
+  const darkHeaderLabels = new Set(['Name EXP', 'VARIANTS'])
+  const tintedLabels = new Set([
+    'IDEA:',
+    'WHY:',
+    'AUDIENCE/REGION:',
+    'SEGMENT: ALL',
+    'FORMATS:',
+    'VARIANTS: 4',
+    'Product:',
+  ])
   for (const item of briefingBlocks) {
     const block = makeBlockFrame()
     if (item.value === null) {
@@ -640,7 +826,7 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
       elements.layoutMode = 'VERTICAL'
       elements.primaryAxisSizingMode = 'AUTO'
       elements.counterAxisSizingMode = 'FIXED'
-      elements.itemSpacing = 6
+      elements.itemSpacing = 6 * S
       elements.fills = []
       appendAndStretch(block, elements)
       const label = makeTextNode(item.label, item.label, font)
@@ -654,8 +840,21 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
       appendAndStretch(elements, specs)
       const dash = makeTextNode('-', '-', font)
       appendAndStretch(specs, dash)
+      if (item.label === 'Visual' || item.label === 'Copy info:') {
+        block.fills = [solidPaint(0.96, 0.97, 0.99)]
+      }
     } else {
       const tn = makeTextNode(item.label, item.value, font)
+      if (item.label === 'Name EXP') {
+        tn.setPluginData('bifrostId', 'bifrost:exp_name')
+        tn.setPluginData('placeholderId', 'bifrost:exp_name')
+      }
+      if (darkHeaderLabels.has(item.label)) {
+        block.fills = [solidPaint(0.25, 0.25, 0.27)]
+        applyTextColor(tn, 1, 1, 1)
+      } else if (tintedLabels.has(item.label)) {
+        block.fills = [solidPaint(0.96, 0.97, 0.99)]
+      }
       appendAndStretch(block, tn)
     }
     appendAndStretch(briefingCol, block)
@@ -669,22 +868,17 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     appendAndStretch(briefingCol, block)
   }
 
-  const copyCol = makeColumnFrame('Copy', colW)
-  row.appendChild(copyCol)
+  const { wrapper: copyWrapper, body: copyCol } = makeColumnWithHeader('Copy', colW, true)
+  row.appendChild(copyWrapper)
   let copyBlock = makeBlockFrame()
-  appendAndStretch(copyCol, copyBlock)
-  appendAndStretch(copyBlock, makeTextNode('Copy', 'Copy', font))
-  copyBlock = makeBlockFrame()
-  appendAndStretch(copyCol, copyBlock)
-  appendAndStretch(copyBlock, makeTextNode('Not Started', 'Not Started', font))
   for (const letter of ['A', 'B', 'C', 'D']) {
     const varFrame = figma.createFrame()
     varFrame.name = `Variation ${letter}`
     varFrame.layoutMode = 'VERTICAL'
     varFrame.primaryAxisSizingMode = 'AUTO'
     varFrame.counterAxisSizingMode = 'FIXED'
-    varFrame.itemSpacing = 10
-    varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12
+    varFrame.itemSpacing = 10 * S
+    varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12 * S
     varFrame.fills = [{ type: 'SOLID', color: { r: 0.92, g: 0.92, b: 0.94 } }]
     varFrame.resize(colW, 100)
     varFrame.clipsContent = false
@@ -702,14 +896,9 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     }
   }
 
-  const designCol = makeColumnFrame('Design', 900)
-  row.appendChild(designCol)
+  const { wrapper: designWrapper, body: designCol } = makeColumnWithHeader('Design', designW, true)
+  row.appendChild(designWrapper)
   let designBlock = makeBlockFrame()
-  appendAndStretch(designCol, designBlock)
-  appendAndStretch(designBlock, makeTextNode('Design', 'Design', font))
-  designBlock = makeBlockFrame()
-  appendAndStretch(designCol, designBlock)
-  appendAndStretch(designBlock, makeTextNode('Not Started', 'Not Started', font))
   const sizes = ['4x5', '9x16', '1x1']
   for (const letter of ['A', 'B', 'C', 'D']) {
     const varFrame = figma.createFrame()
@@ -717,10 +906,10 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     varFrame.layoutMode = 'VERTICAL'
     varFrame.primaryAxisSizingMode = 'AUTO'
     varFrame.counterAxisSizingMode = 'FIXED'
-    varFrame.itemSpacing = 12
-    varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12
+    varFrame.itemSpacing = 12 * S
+    varFrame.paddingTop = varFrame.paddingBottom = varFrame.paddingLeft = varFrame.paddingRight = 12 * S
     varFrame.fills = []
-    varFrame.resize(900, 100)
+    varFrame.resize(designW, 100)
     varFrame.clipsContent = false
     appendAndStretch(designCol, varFrame)
     const assetRow = figma.createFrame()
@@ -728,25 +917,22 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     assetRow.layoutMode = 'HORIZONTAL'
     assetRow.primaryAxisSizingMode = 'AUTO'
     assetRow.counterAxisSizingMode = 'FIXED'
-    assetRow.itemSpacing = 12
+    assetRow.itemSpacing = 12 * S
     assetRow.fills = []
-    assetRow.resize(900, 200)
+    assetRow.resize(designW, 200 * S)
     appendAndStretch(varFrame, assetRow)
     for (const size of sizes) {
       const f = figma.createFrame()
       f.name = 'NAME-EXP-' + size
-      f.resize(size === '4x5' ? 144 : size === '9x16' ? 108 : 144, size === '4x5' ? 180 : size === '9x16' ? 192 : 144)
+      f.resize((size === '4x5' ? 144 : size === '9x16' ? 108 : 144) * S, (size === '4x5' ? 180 : size === '9x16' ? 192 : 144) * S)
       f.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]
       assetRow.appendChild(f) // asset frames: do NOT stretch (keep design ratio sizes)
     }
   }
 
-  const uploadsCol = makeColumnFrame('Uploads', 280)
-  row.appendChild(uploadsCol)
+  const { wrapper: uploadsWrapper, body: uploadsCol } = makeColumnWithHeader('Uploads', uploadsW, false)
+  row.appendChild(uploadsWrapper)
   let uploadsBlock = makeBlockFrame()
-  appendAndStretch(uploadsCol, uploadsBlock)
-  appendAndStretch(uploadsBlock, makeTextNode('Uploads', 'Uploads', font))
-  uploadsBlock = makeBlockFrame()
   appendAndStretch(uploadsCol, uploadsBlock)
   appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font))
 

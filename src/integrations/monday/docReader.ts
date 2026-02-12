@@ -21,41 +21,53 @@ function parseJsonObject(value: unknown): JsonObject | null {
   return null
 }
 
-/** Extract plain text from a block content (may be Delta JSON or string). */
-function blockToText(content: unknown): string {
-  if (content == null) return ''
+/**
+ * Extract plain text from a block content (may be Delta JSON or string).
+ * Detects if content is bold-only (heading marker) for markdown output.
+ */
+function blockToText(content: unknown): { text: string; isBoldOnly: boolean } {
+  if (content == null) return { text: '', isBoldOnly: false }
+
+  let text = ''
+  let isBoldOnly = false
+
   if (typeof content === 'string') {
     const parsed = parseJsonObject(content)
     if (parsed) {
       if (Array.isArray(parsed.deltaFormat)) {
-        return (parsed.deltaFormat as Array<{ insert?: string }>)
-          .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
-          .join('')
+        const ops = parsed.deltaFormat as Array<{ insert?: string; attributes?: Record<string, unknown> }>
+        text = ops.map((op) => (typeof op.insert === 'string' ? op.insert : '')).join('')
+        isBoldOnly = ops.length > 0 && ops.every((op) => !op.insert || op.attributes?.bold === true)
+      } else if (Array.isArray(parsed.ops)) {
+        const ops = parsed.ops as Array<{ insert?: string; attributes?: Record<string, unknown> }>
+        text = ops.map((op) => (typeof op.insert === 'string' ? op.insert : '')).join('')
+        isBoldOnly = ops.length > 0 && ops.every((op) => !op.insert || op.attributes?.bold === true)
+      } else if (typeof parsed.text === 'string') {
+        text = parsed.text
+      } else if (Array.isArray(parsed.cells)) {
+        return { text: '', isBoldOnly: false }
       }
-      if (Array.isArray(parsed.ops)) {
-        return (parsed.ops as Array<{ insert?: string }>)
-          .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
-          .join('')
-      }
-      if (typeof parsed.text === 'string') return parsed.text
-      if (Array.isArray(parsed.cells)) return ''
+    } else {
+      text = content
     }
-    return content
+  } else if (typeof content !== 'object') {
+    text = String(content)
+  } else {
+    const obj = content as Record<string, unknown>
+    if (Array.isArray(obj.deltaFormat)) {
+      const ops = obj.deltaFormat as Array<{ insert?: string; attributes?: Record<string, unknown> }>
+      text = ops.map((op) => (typeof op.insert === 'string' ? op.insert : '')).join('')
+      isBoldOnly = ops.length > 0 && ops.every((op) => !op.insert || op.attributes?.bold === true)
+    } else if (Array.isArray(obj.ops)) {
+      const ops = obj.ops as Array<{ insert?: string; attributes?: Record<string, unknown> }>
+      text = ops.map((op) => (typeof op.insert === 'string' ? op.insert : '')).join('')
+      isBoldOnly = ops.length > 0 && ops.every((op) => !op.insert || op.attributes?.bold === true)
+    } else if (typeof obj.text === 'string') {
+      text = obj.text
+    }
   }
-  if (typeof content !== 'object') return String(content)
-  const obj = content as Record<string, unknown>
-  if (Array.isArray(obj.deltaFormat)) {
-    return (obj.deltaFormat as Array<{ insert?: string }>)
-      .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
-      .join('')
-  }
-  if (Array.isArray(obj.ops)) {
-    return (obj.ops as Array<{ insert?: string }>)
-      .map((op) => (typeof op.insert === 'string' ? op.insert : ''))
-      .join('')
-  }
-  if (typeof obj.text === 'string') return obj.text
-  return ''
+
+  return { text, isBoldOnly }
 }
 
 function getTableCells(content: unknown): Array<Array<{ blockId?: string }>> | null {
@@ -105,7 +117,7 @@ function collectDescendantText(
   for (const child of children) {
     if (visited.has(child.id)) continue
     visited.add(child.id)
-    const ownText = normalizeCellText(blockToText(child.content))
+    const ownText = normalizeCellText(blockToText(child.content).text)
     if (ownText && !isPureStyleJsonText(ownText)) parts.push(ownText)
     const nested = collectDescendantText(child.id, childrenByParent, visited)
     if (nested) parts.push(nested)
@@ -191,12 +203,13 @@ export async function getDocContent(docId: string): Promise<string | null> {
           const source = byId.get(blockId)
           if (!source) return ''
           const visited = new Set<string>()
-          const ownText = normalizeCellText(blockToText(source.content))
-          if (ownText && !isPureStyleJsonText(ownText)) visited.add(source.id)
+          const { text: ownText } = blockToText(source.content)
+          const normalizedOwn = normalizeCellText(ownText)
+          if (normalizedOwn && !isPureStyleJsonText(normalizedOwn)) visited.add(source.id)
           const nestedText = collectDescendantText(source.id, childrenByParent, visited)
           for (const id of visited) consumedDescendantBlockIds.add(id)
-          if (ownText && !isPureStyleJsonText(ownText)) {
-            return [ownText, nestedText].filter(Boolean).join('\n').trim()
+          if (normalizedOwn && !isPureStyleJsonText(normalizedOwn)) {
+            return [normalizedOwn, nestedText].filter(Boolean).join('\n').trim()
           }
           return nestedText
         })
@@ -218,10 +231,30 @@ export async function getDocContent(docId: string): Promise<string | null> {
       }
       if (consumedCellBlockIds.has(block.id)) continue
       if (consumedDescendantBlockIds.has(block.id)) continue
-      const text = blockToText(block.content).trim()
-      if (!text) continue
-      if (isPureStyleJsonText(text)) continue
-      parts.push(text)
+
+      const { text, isBoldOnly } = blockToText(block.content)
+      const trimmed = text.trim()
+      if (!trimmed) continue
+      if (isPureStyleJsonText(trimmed)) continue
+
+      const blockType = block.type ?? ''
+      let formatted = trimmed
+
+      // Prefix headings: small title, medium title, or bold-only normal text
+      if (blockType === 'small title' || blockType === 'medium title' || (blockType === 'normal text' && isBoldOnly && trimmed.length < 80)) {
+        formatted = `## ${trimmed}`
+      }
+      // Prefix bullet lists
+      else if (blockType === 'bulleted list') {
+        formatted = `- ${trimmed}`
+      }
+      // Prefix check lists with [x] / [ ]
+      else if (blockType === 'check list') {
+        const checked = typeof block.content === 'object' && block.content !== null && (block.content as Record<string, unknown>).checked === true
+        formatted = checked ? `[x] ${trimmed}` : `[ ] ${trimmed}`
+      }
+
+      parts.push(formatted)
     }
     return parts.length ? parts.join('\n\n') : null
   } catch {
