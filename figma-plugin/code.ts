@@ -1565,6 +1565,14 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
     if (templatePage) break
   }
 
+  // Ensure template page is loaded (documentAccess: dynamic-page).
+  // If the user is on a different page, accessing template children or cloning can yield empty pages.
+  if (templatePage && typeof (templatePage as any).loadAsync === 'function') {
+    try {
+      await (templatePage as any).loadAsync()
+    } catch (_) {}
+  }
+
   if (!templatePage) {
     return jobs.map(function (job) {
       return { idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: '', fileUrl: '', error: 'No template page found' }
@@ -1593,6 +1601,12 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
         targetPage.name = job.experimentPageName
         createdNew = true
       }
+
+      // Ensure the target page is loaded before traversing/modifying it (dynamic-page).
+      if (targetPage && typeof (targetPage as any).loadAsync === 'function') {
+        try { await (targetPage as any).loadAsync() } catch (_) {}
+      }
+
       targetPage.setPluginData('bifrostIdempotencyKey', job.idempotencyKey)
       targetPage.setPluginData('bifrostMondayItemId', job.mondayItemId || '')
       if (briefing.sectionName) {
@@ -1621,6 +1635,17 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
         matched: false,
       })
 
+      // Scope all expensive traversal to the primary content frame only.
+      // This avoids traversing hidden support nodes (e.g. status component set).
+      var contentRoot: BaseNode = targetPage
+      for (var ci = 0; ci < targetPage.children.length; ci++) {
+        var child = targetPage.children[ci]
+        if (child.type === 'FRAME' && (child as FrameNode).name === 'Name Briefing') {
+          contentRoot = child
+          break
+        }
+      }
+
       if (hasMapping) {
         var mappingEntries: MappingEntry[] = []
         for (var m = 0; m < job.nodeMapping!.length; m++) {
@@ -1632,27 +1657,32 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
             value: val,
           })
         }
-        await applyNodeMapping(targetPage, mappingEntries, (job.frameRenames || []).slice())
-        // Backfill any placeholder-bound fields the model didn't map.
-        await fillTextNodes(targetPage, briefing)
+        await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice())
+        // Skip fillTextNodes when mapping covers all content — it causes
+        // the plugin to hang on large templates (140+ node re-traversal).
+        // applyNodeMapping already filled every field the mapping provides.
       } else {
-        await fillTextNodes(targetPage, briefing)
+        await fillTextNodes(contentRoot, briefing)
       }
 
       // ── Smart Layout Normalization ──
-      // Analyze how content is placed and proportionally adjust frames,
-      // text nodes, and spacing to prevent cramming/overflow.
-      var layoutResult = await normalizeLayout(targetPage)
-      debugLog.push({
-        nodeName: '__LAYOUT_NORM__',
-        chars: 'textFixed=' + layoutResult.textNodesFixed
-          + ' framesConverted=' + layoutResult.framesConverted
-          + ' framesHugged=' + layoutResult.framesHugged
-          + ' stretched=' + layoutResult.childrenStretched
-          + ' skipped=[' + layoutResult.skippedFrames.slice(0, 5).join(', ') + ']',
-        path: [],
-        matched: true,
-      })
+      // Skip when mapping was used — applyNodeMapping + styleFilledContent
+      // already handle typography. The 6-phase normalizeLayout re-traverses
+      // 140+ nodes (840+ visits total) which exhausts the Figma API after
+      // the heavy applyNodeMapping pass and causes the plugin to hang.
+      if (!hasMapping) {
+        var layoutResult = await normalizeLayout(contentRoot)
+        debugLog.push({
+          nodeName: '__LAYOUT_NORM__',
+          chars: 'textFixed=' + layoutResult.textNodesFixed
+            + ' framesConverted=' + layoutResult.framesConverted
+            + ' framesHugged=' + layoutResult.framesHugged
+            + ' stretched=' + layoutResult.childrenStretched
+            + ' skipped=[' + layoutResult.skippedFrames.slice(0, 5).join(', ') + ']',
+          path: [],
+          matched: true,
+        })
+      }
 
       var pageId = targetPage.id
       var fileUrl = 'https://www.figma.com/file/' + fileKey + '?node-id=' + encodeURIComponent(pageId.replace(':', '-'))
@@ -1686,9 +1716,18 @@ var uiHtml = '<html><head><style>'
   + '<button id="sync">Sync queued briefings</button>'
   + '<button id="create-template" style="margin-top:8px;">Create Auto-Layout Template</button>'
   + '<script>'
+  + 'parent.postMessage({ pluginMessage: { type: "ui-boot" } }, "*");'
+  + 'window.onerror = function(message, source, lineno, colno) {'
+  + '  parent.postMessage({ pluginMessage: { type: "ui-script-error", message: String(message || ""), source: String(source || ""), lineno: Number(lineno || 0), colno: Number(colno || 0) } }, "*");'
+  + '};'
+  + 'window.addEventListener("unhandledrejection", function(ev) {'
+  + '  var reason = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : "unknown";'
+  + '  parent.postMessage({ pluginMessage: { type: "ui-script-rejection", reason: String(reason) } }, "*");'
+  + '});'
   + 'var DEFAULT_BIFROST_API = "http://localhost:3846";'
   + 'var BIFROST_API = DEFAULT_BIFROST_API;'
   + 'var fileKey = "";'
+  + 'var isSyncing = false;'
   + 'function sanitizeApiBase(raw) {'
   + '  var v = (raw || "").trim();'
   + '  if (!v) return DEFAULT_BIFROST_API;'
@@ -1708,6 +1747,8 @@ var uiHtml = '<html><head><style>'
   + '  el.className = "";'
   + '};'
   + 'document.getElementById("sync").onclick = function() {'
+  + '  if (isSyncing) { document.getElementById("msg").textContent = "Sync already in progress..."; return; }'
+  + '  isSyncing = true;'
   + '  document.getElementById("msg").textContent = "Fetching queued jobs...";'
   + '  document.getElementById("msg").className = "";'
   + '  parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");'
@@ -1717,6 +1758,7 @@ var uiHtml = '<html><head><style>'
   + '  document.getElementById("msg").className = "";'
   + '  parent.postMessage({ pluginMessage: { type: "create-template" } }, "*");'
   + '};'
+  + 'parent.postMessage({ pluginMessage: { type: "ui-handlers-bound", hasSync: !!document.getElementById("sync"), hasCreate: !!document.getElementById("create-template"), hasSave: !!document.getElementById("save-api") } }, "*");'
   + 'function fetchJobs(fk) {'
   + '  fileKey = fk;'
   + '  fetch(BIFROST_API + "/api/jobs/queued?fileKey=" + encodeURIComponent(fk))'
@@ -1736,6 +1778,7 @@ var uiHtml = '<html><head><style>'
   + '      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");'
   + '    })'
   + '    .catch(function(e) {'
+  + '      isSyncing = false;'
   + '      document.getElementById("msg").textContent = "Fetch error: " + e.message;'
   + '      document.getElementById("msg").className = "err";'
   + '    });'
@@ -1754,6 +1797,7 @@ var uiHtml = '<html><head><style>'
   + '    }'
   + '  }'
   + '  Promise.all(promises).then(function() {'
+  + '    isSyncing = false;'
   + '    var el = document.getElementById("msg");'
   + '    el.textContent = "Done: " + done + " page(s) created." + (failed.length ? " Failed: " + failed.join(", ") : "");'
   + '    el.className = failed.length ? "err" : "";'
@@ -1774,7 +1818,8 @@ var uiHtml = '<html><head><style>'
   + '    }'
   + '    var img = images[i];'
   + '    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;'
-  + '    fetch(img.url)'
+  + '    var fetchUrl = BIFROST_API + "/api/images/proxy?url=" + encodeURIComponent(img.url);'
+  + '    fetch(fetchUrl)'
   + '      .then(function(r) {'
   + '        if (!r.ok) throw new Error("HTTP " + r.status);'
   + '        return r.arrayBuffer();'
@@ -1795,8 +1840,12 @@ var uiHtml = '<html><head><style>'
   + '}'
   + 'onmessage = function(e) {'
   + '  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;'
-  + '  if (d.type === "file-key") fetchJobs(d.fileKey);'
-  + '  if (d.type === "jobs-processed") reportResults(d.results);'
+  + '  if (d.type === "file-key") {'
+  + '    fetchJobs(d.fileKey);'
+  + '  }'
+  + '  if (d.type === "jobs-processed") {'
+  + '    reportResults(d.results);'
+  + '  }'
   + '  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_BIFROST_API);'
   + '  if (d.type === "create-template-done") {'
   + '    var el = document.getElementById("msg");'
@@ -1832,7 +1881,23 @@ figma.ui.onmessage = async function (msg: {
   // Image import messages from UI
   images?: Array<{ url: string; name: string; pageId: string; bytes: number[] }>;
   imageCount?: number;
+  message?: string;
+  source?: string;
+  lineno?: number;
+  colno?: number;
+  reason?: string;
+  hasSync?: boolean;
+  hasCreate?: boolean;
+  hasSave?: boolean;
 }) {
+  if (msg.type === 'ui-boot') {
+  }
+  if (msg.type === 'ui-handlers-bound') {
+  }
+  if (msg.type === 'ui-script-error') {
+  }
+  if (msg.type === 'ui-script-rejection') {
+  }
   if (msg.type === 'get-api-base') {
     const saved = await figma.clientStorage.getAsync('bifrostApiBase')
     const apiBase = typeof saved === 'string' && saved.trim() ? saved.trim() : 'http://localhost:3846'
@@ -1852,7 +1917,19 @@ figma.ui.onmessage = async function (msg: {
     figma.ui.postMessage({ type: 'create-template-done', error: result.error })
   }
   if (msg.type === 'process-jobs' && msg.jobs) {
-    var results = await processJobs(msg.jobs)
+    var results: Array<{ idempotencyKey: string; experimentPageName: string; pageId: string; fileUrl: string; error?: string }>
+    try {
+      results = await processJobs(msg.jobs)
+    } catch (e) {
+      const err = e instanceof Error ? e.message : 'Unknown error'
+      results = msg.jobs.map((job) => ({
+        idempotencyKey: job.idempotencyKey,
+        experimentPageName: job.experimentPageName,
+        pageId: '',
+        fileUrl: '',
+        error: err,
+      }))
+    }
     figma.ui.postMessage({ type: 'jobs-processed', results: results })
 
     // Send debug log to UI

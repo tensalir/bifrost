@@ -9,10 +9,18 @@ import type { PendingSyncJob, PendingSyncJobState } from '../src/jobs/types.js'
 // ---------------------------------------------------------------------------
 // In-memory fallback for local dev (no Vercel KV)
 // ---------------------------------------------------------------------------
-const memStore = new Map<string, string>()
-const memSets = new Map<string, Set<string>>()
-const memSorted = new Map<string, { score: number; member: string }[]>()
-const memLists = new Map<string, string[]>()
+// Use globalThis to persist across Next.js HMR reloads in dev mode.
+// Without this, module reloads clear the Maps and all queued jobs vanish.
+const g = globalThis as unknown as {
+  _bifrostMemStore?: Map<string, unknown>
+  _bifrostMemSets?: Map<string, Set<string>>
+  _bifrostMemSorted?: Map<string, { score: number; member: string }[]>
+  _bifrostMemLists?: Map<string, string[]>
+}
+const memStore = g._bifrostMemStore ?? (g._bifrostMemStore = new Map<string, unknown>())
+const memSets = g._bifrostMemSets ?? (g._bifrostMemSets = new Map<string, Set<string>>())
+const memSorted = g._bifrostMemSorted ?? (g._bifrostMemSorted = new Map<string, { score: number; member: string }[]>())
+const memLists = g._bifrostMemLists ?? (g._bifrostMemLists = new Map<string, string[]>())
 
 function getSet(key: string): Set<string> {
   if (!memSets.has(key)) memSets.set(key, new Set())
@@ -51,7 +59,9 @@ async function kvSet(key: string, value: string) {
 async function kvGet(key: string): Promise<string | null> {
   const kv = await getKV()
   if (kv) return kv.get<string>(key)
-  return memStore.get(key) ?? null
+  const v = memStore.get(key)
+  if (v == null) return null
+  return typeof v === 'string' ? v : (v as string)
 }
 async function kvDel(key: string) {
   const kv = await getKV()

@@ -7,12 +7,16 @@ export async function GET(request: Request) {
     const fileKey = searchParams.get('fileKey') ?? searchParams.get('file_key')
     const batch = searchParams.get('batchCanonical') ?? searchParams.get('batch')
     
-    const jobs = fileKey
+    const allJobs = fileKey
       ? await getJobsByFileKey(fileKey)
       : batch
         ? await getJobsByBatch(batch)
         : await getAllJobs()
     
+    // Only return queued jobs — plugin should not re-process completed/failed ones
+    const jobs = allJobs.filter((j) => j.state === 'queued')
+
+
     return NextResponse.json({ jobs }, {
       status: 200,
       headers: {
