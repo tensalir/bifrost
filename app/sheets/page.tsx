@@ -5,20 +5,17 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import {
   MessageSquare,
-  ArrowRight,
-  ArrowLeft,
   Loader2,
-  FolderOpen,
   FileText,
-  Pin,
-  PinOff,
   ClipboardList,
+  ArrowRight,
 } from 'lucide-react'
 import Link from 'next/link'
+import { Nav } from '@/components/nav'
+import { cn } from '@/lib/utils'
 
-/* -------------------------------------------------------------------------- */
-/*  Types                                                                     */
-/* -------------------------------------------------------------------------- */
+const PERFORMANCE_ADS_PROJECT_ID = '387033831'
+const PERFORMANCE_ADS_PROJECT_NAME = 'Performance Ads'
 
 interface FigmaFile {
   key: string
@@ -27,16 +24,11 @@ interface FigmaFile {
   last_modified?: string
 }
 
-interface FigmaProjectWithFiles {
+interface FeedbackRound {
   id: string
   name: string
-  files: FigmaFile[]
-}
-
-interface TeamData {
-  id: string
-  name: string
-  projects: FigmaProjectWithFiles[]
+  monday_board_id: string
+  created_at: string
 }
 
 /* -------------------------------------------------------------------------- */
@@ -89,375 +81,199 @@ function FileCard({
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Project Card (shows thumbnail mosaic)                                     */
+/*  Overview content (tabs + tab content)                                     */
 /* -------------------------------------------------------------------------- */
 
-function ProjectCard({
-  project,
-  onClick,
-  isPinned,
-  onTogglePin,
-}: {
-  project: FigmaProjectWithFiles
-  onClick: () => void
-  isPinned: boolean
-  onTogglePin: (e: React.MouseEvent) => void
-}) {
-  const previewFiles = project.files.slice(0, 4)
-  const fileCount = project.files.length
-
-  return (
-    <div className="group relative rounded-xl border border-border bg-card overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200">
-      <button onClick={onClick} className="w-full text-left">
-        <div className="aspect-[3/2] bg-muted/20 relative overflow-hidden">
-          {previewFiles.length > 0 ? (
-            <div className="grid grid-cols-2 gap-px h-full bg-border/30">
-              {previewFiles.map((f) => (
-                <div key={f.key} className="bg-muted/30 overflow-hidden">
-                  {f.thumbnail_url ? (
-                    <img
-                      src={f.thumbnail_url}
-                      alt={f.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <FileText className="h-6 w-6 text-muted-foreground/20" />
-                    </div>
-                  )}
-                </div>
-              ))}
-              {previewFiles.length < 4 &&
-                Array.from({ length: 4 - previewFiles.length }).map((_, i) => (
-                  <div key={`empty-${i}`} className="bg-muted/10" />
-                ))}
-            </div>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <FolderOpen className="h-10 w-10 text-muted-foreground/20" />
-            </div>
-          )}
-        </div>
-        <div className="p-3 flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
-          <span className="shrink-0 ml-2 text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-            {fileCount} {fileCount === 1 ? 'file' : 'files'}
-          </span>
-        </div>
-      </button>
-      {/* Pin toggle */}
-      <button
-        onClick={onTogglePin}
-        className={`absolute top-2 right-2 p-1.5 rounded-lg transition-all ${
-          isPinned
-            ? 'bg-primary/20 text-primary opacity-100'
-            : 'bg-background/60 backdrop-blur-sm text-muted-foreground opacity-0 group-hover:opacity-100'
-        } hover:bg-primary/30 hover:text-primary`}
-        title={isPinned ? 'Unpin project' : 'Pin project'}
-      >
-        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-      </button>
-    </div>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Main content (uses searchParams)                                          */
-/* -------------------------------------------------------------------------- */
-
-function SheetsContent() {
+function SheetsOverviewContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const selectedProjectId = searchParams.get('project')
+  const tab = searchParams.get('tab')
+  const activeTab = tab === 'stakeholder' ? 'stakeholder' : 'figma'
 
-  const [teams, setTeams] = useState<TeamData[]>([])
-  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [figmaFiles, setFigmaFiles] = useState<FigmaFile[]>([])
+  const [figmaLoading, setFigmaLoading] = useState(true)
+  const [figmaError, setFigmaError] = useState<string | null>(null)
 
-  // Fallback URL input
-  const [urlInput, setUrlInput] = useState('')
-  const [urlError, setUrlError] = useState('')
+  const [rounds, setRounds] = useState<FeedbackRound[]>([])
+  const [roundsLoading, setRoundsLoading] = useState(false)
 
-  const fetchTeams = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const fetchFigmaFiles = useCallback(async () => {
+    setFigmaLoading(true)
+    setFigmaError(null)
     try {
-      const [teamsRes, pinsRes] = await Promise.all([
-        fetch('/api/figma/teams'),
-        fetch('/api/pinned-projects'),
-      ])
-      if (teamsRes.ok) {
-        const data = await teamsRes.json()
-        setTeams(data.teams ?? [])
+      const res = await fetch(`/api/figma/projects/${PERFORMANCE_ADS_PROJECT_ID}/files`)
+      const data = await res.json()
+      if (res.ok) {
+        setFigmaFiles(data.files ?? [])
       } else {
-        const data = await teamsRes.json()
-        setError(data.error || 'Failed to load projects')
-      }
-      if (pinsRes.ok) {
-        const data = await pinsRes.json()
-        setPinnedIds(new Set(data.pinnedProjectIds ?? []))
+        setFigmaError(data.error ?? 'Failed to load files')
       }
     } catch {
-      setError('Failed to connect to Figma')
+      setFigmaError('Failed to connect to Figma')
     } finally {
-      setLoading(false)
+      setFigmaLoading(false)
+    }
+  }, [])
+
+  const fetchRounds = useCallback(async () => {
+    setRoundsLoading(true)
+    try {
+      const res = await fetch('/api/feedback')
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.rounds)) {
+        setRounds(data.rounds)
+      }
+    } catch {
+      setRounds([])
+    } finally {
+      setRoundsLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchTeams()
-  }, [fetchTeams])
+    fetchFigmaFiles()
+  }, [fetchFigmaFiles])
 
-  const PERFORMANCE_ADS_PROJECT_ID = '387033831'
-  const allProjects = teams.flatMap((t) => t.projects)
-  const pinnedProjects = allProjects.filter((p) => pinnedIds.has(p.id))
-  const unpinnedProjects = allProjects
-    .filter((p) => !pinnedIds.has(p.id))
-    .sort((a, b) => {
-      if (a.id === PERFORMANCE_ADS_PROJECT_ID) return -1
-      if (b.id === PERFORMANCE_ADS_PROJECT_ID) return 1
-      return 0
-    })
+  useEffect(() => {
+    if (activeTab === 'stakeholder') {
+      fetchRounds()
+    }
+  }, [activeTab, fetchRounds])
 
-  const selectedProject = selectedProjectId
-    ? allProjects.find((p) => p.id === selectedProjectId)
-    : null
-
-  const togglePin = async (projectId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const isPinned = pinnedIds.has(projectId)
-
-    // Optimistic update
-    setPinnedIds((prev) => {
-      const next = new Set(prev)
-      if (isPinned) next.delete(projectId)
-      else next.add(projectId)
-      return next
-    })
-
-    try {
-      await fetch('/api/pinned-projects', {
-        method: isPinned ? 'DELETE' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId }),
-      })
-    } catch {
-      // Revert on failure
-      setPinnedIds((prev) => {
-        const next = new Set(prev)
-        if (isPinned) next.add(projectId)
-        else next.delete(projectId)
-        return next
-      })
+  const setTab = (newTab: 'figma' | 'stakeholder') => {
+    if (newTab === 'stakeholder') {
+      router.push('/sheets?tab=stakeholder')
+    } else {
+      router.push('/sheets')
     }
   }
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    setUrlError('')
-    const input = urlInput.trim()
-    let fileKey = input
-    const figmaMatch = input.match(/figma\.com\/(?:design|file)\/([a-zA-Z0-9]+)/)
-    if (figmaMatch) fileKey = figmaMatch[1]
-    if (!fileKey || fileKey.length < 10) {
-      setUrlError('Please enter a valid Figma file URL or file key')
-      return
-    }
-    router.push(`/sheets/${fileKey}`)
-  }
+  const latestRound = rounds.length > 0 ? rounds[0] : null
 
-  /* Loading state */
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-6 w-6 animate-spin mx-auto text-primary mb-3" />
-          <p className="text-sm text-muted-foreground">Loading Figma projects...</p>
-        </div>
-      </div>
-    )
-  }
-
-  /* Error state */
-  if (error && allProjects.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="w-full max-w-md mx-4 text-center">
-          <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 rounded-2xl bg-card border border-border">
-            <MessageSquare className="h-6 w-6 text-primary" />
-          </div>
-          <h1 className="text-xl font-semibold text-foreground mb-2">Figma Comments</h1>
-          <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-            {error}. You can still paste a Figma URL directly.
-          </p>
-          <form onSubmit={handleUrlSubmit} className="space-y-3">
-            <input
-              type="text"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://figma.com/design/PLM843cfIiwGNicVpk4Bh4/..."
-              className="w-full px-4 py-2.5 rounded-lg border border-border bg-card text-foreground text-sm placeholder:text-muted-foreground/40 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all"
-            />
-            {urlError && <p className="text-xs text-destructive">{urlError}</p>}
-            <button
-              type="submit"
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-            >
-              Load Comments <ArrowRight className="h-4 w-4" />
-            </button>
-          </form>
-        </div>
-      </div>
-    )
-  }
-
-  /* File grid for a selected project */
-  if (selectedProject) {
-    return (
-      <div className="h-full overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <button
-            onClick={() => router.push('/sheets')}
-            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            All projects
-          </button>
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">
-              {selectedProject.name}
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {selectedProject.files.length} design {selectedProject.files.length === 1 ? 'file' : 'files'}
-            </p>
-          </div>
-          {selectedProject.files.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No files found in this project.</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {selectedProject.files.map((file) => (
-                <FileCard
-                  key={file.key}
-                  file={file}
-                  projectId={selectedProject.id}
-                  onClick={() => router.push(`/sheets/${file.key}?project=${selectedProject.id}`)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  /* Project grid (default view) */
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Figma Comments
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Select a project to view and consolidate Figma comments.
-          </p>
-        </div>
-
-        {/* Stakeholder Feedback entry — before pinned projects */}
-        <div className="mb-10">
-          <Link
-            href="/sheets/stakeholder"
-            className="group flex items-center gap-4 rounded-xl border border-border bg-card p-4 overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 text-left w-full max-w-md"
-          >
-            <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-primary/10 text-primary shrink-0">
-              <ClipboardList className="h-6 w-6" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold text-foreground">Stakeholder Feedback</h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Consolidate strategy, design, and copy feedback. Import from Excel, send to Monday.
-              </p>
-            </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
-          </Link>
-        </div>
-
-        {/* Pinned projects */}
-        {pinnedProjects.length > 0 && (
-          <div className="mb-10">
-            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">
-              <Pin className="h-3 w-3" />
-              Pinned
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {pinnedProjects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  isPinned={true}
-                  onTogglePin={(e) => togglePin(project.id, e)}
-                  onClick={() => router.push(`/sheets?project=${project.id}`)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* All projects */}
-        {unpinnedProjects.length > 0 && (
-          <div className="mb-12">
-            {pinnedProjects.length > 0 && (
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">
-                All projects
-              </p>
+    <main className="flex-1 min-h-0 overflow-auto flex flex-col">
+      <div className="border-b border-border bg-card/40 px-6 py-3 flex items-center gap-6">
+        <h1 className="text-xl font-bold tracking-tight text-foreground">
+          Feedback
+        </h1>
+        <div className="flex gap-0 rounded-lg p-0.5 bg-muted/50">
+          <button
+            onClick={() => setTab('figma')}
+            className={cn(
+              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+              activeTab === 'figma'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {unpinnedProjects.map((project) => (
-                <ProjectCard
-                  key={project.id}
-                  project={project}
-                  isPinned={false}
-                  onTogglePin={(e) => togglePin(project.id, e)}
-                  onClick={() => router.push(`/sheets?project=${project.id}`)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Fallback: paste URL */}
-        <div className="max-w-md mx-auto">
-          <div className="border-t border-border pt-8">
-            <p className="text-xs text-muted-foreground/60 text-center mb-3">
-              Or paste a Figma file URL directly
-            </p>
-            <form onSubmit={handleUrlSubmit} className="flex gap-2">
-              <input
-                type="text"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="https://figma.com/design/..."
-                className="flex-1 px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm placeholder:text-muted-foreground/40 outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-all"
-              />
-              <button
-                type="submit"
-                className="shrink-0 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-              >
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            </form>
-            {urlError && <p className="text-xs text-destructive mt-1">{urlError}</p>}
-          </div>
+          >
+            Figma Comments
+          </button>
+          <button
+            onClick={() => setTab('stakeholder')}
+            className={cn(
+              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+              activeTab === 'stakeholder'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Stakeholder Feedback
+          </button>
         </div>
       </div>
-    </div>
+
+      <div className="flex-1 overflow-auto">
+        {activeTab === 'figma' && (
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-foreground">
+                {PERFORMANCE_ADS_PROJECT_NAME}
+              </h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Select a file to view and consolidate Figma comments.
+              </p>
+            </div>
+
+            {figmaLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : figmaError ? (
+              <div className="rounded-xl border border-border bg-card p-8 text-center">
+                <MessageSquare className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">{figmaError}</p>
+              </div>
+            ) : figmaFiles.length === 0 ? (
+              <div className="rounded-xl border border-border bg-card p-8 text-center">
+                <p className="text-sm text-muted-foreground">No files found in this project.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {figmaFiles.map((file) => (
+                  <FileCard
+                    key={file.key}
+                    file={file}
+                    projectId={PERFORMANCE_ADS_PROJECT_ID}
+                    onClick={() =>
+                      router.push(`/sheets/${file.key}?project=${PERFORMANCE_ADS_PROJECT_ID}`)
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'stakeholder' && (
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            {roundsLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <Link
+                href="/sheets/stakeholder"
+                className="group flex items-center gap-4 rounded-xl border border-border bg-card p-6 overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 text-left w-full max-w-lg"
+              >
+                <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-primary/10 text-primary shrink-0">
+                  <ClipboardList className="h-7 w-7" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-lg font-semibold text-foreground">
+                    Stakeholder Feedback
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Consolidate strategy, design, and copy feedback. Import from Excel, send to Monday.
+                  </p>
+                  {rounds.length > 0 && (
+                    <p className="text-xs text-muted-foreground/80 mt-2">
+                      {rounds.length} round{rounds.length !== 1 ? 's' : ''}
+                      {latestRound && ` · Latest: ${latestRound.name}`}
+                    </p>
+                  )}
+                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary shrink-0" />
+              </Link>
+            )}
+          </div>
+        )}
+      </div>
+    </main>
   )
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Page wrapper (Suspense for useSearchParams)                               */
+/*  Page: sidebar + overview                                                  */
 /* -------------------------------------------------------------------------- */
+
+function SheetsOverviewPage() {
+  return (
+    <div className="h-full flex overflow-hidden bg-background">
+      <Nav />
+      <SheetsOverviewContent />
+    </div>
+  )
+}
 
 export default function SheetsIndexPage() {
   return (
@@ -468,7 +284,7 @@ export default function SheetsIndexPage() {
         </div>
       }
     >
-      <SheetsContent />
+      <SheetsOverviewPage />
     </Suspense>
   )
 }
