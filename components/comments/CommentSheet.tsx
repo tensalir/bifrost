@@ -239,10 +239,10 @@ export function CommentSheet({ data }: CommentSheetProps) {
         {/* Left preview panel — collapsible */}
         <aside
           className={cn(
-            'flex-shrink-0 border-r border-border/40 bg-card/20 flex flex-col transition-all duration-300 ease-in-out relative',
+            'flex-shrink-0 border-r border-primary/20 bg-primary/[0.03] flex flex-col transition-all duration-300 ease-in-out relative',
             previewPanelOpen
-              ? 'w-[380px] px-5 py-4 gap-3'
-              : 'w-0 px-0 py-4 overflow-hidden border-r-0'
+              ? 'w-[380px] pt-4 pb-4'
+              : 'w-0 pt-4 pb-4 overflow-hidden border-r-0'
           )}
         >
           {previewPanelOpen && selectedLayer && (

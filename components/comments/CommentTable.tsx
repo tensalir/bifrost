@@ -148,37 +148,37 @@ function LayerGroup({ layer, isSelected, onSelect }: LayerGroupProps) {
         className={cn(
           'cursor-pointer transition-colors border-b border-border/40',
           isSelected
-            ? 'bg-primary/5 hover:bg-primary/8'
-            : 'bg-muted/10 hover:bg-muted/20'
+            ? 'bg-primary/8 hover:bg-primary/10'
+            : 'bg-muted/20 hover:bg-muted/30'
         )}
       >
-        <td colSpan={5} className="px-3 py-2">
-          <div className="flex items-center gap-2">
+        <td colSpan={5} className="px-3 py-2.5">
+          <div className="flex items-center gap-2.5">
             <ChevronRight
               className={cn(
-                'h-3.5 w-3.5 text-muted-foreground/50 transition-transform flex-shrink-0',
+                'h-4 w-4 text-muted-foreground/50 transition-transform flex-shrink-0',
                 isSelected && 'rotate-90 text-primary/70'
               )}
             />
-            <Layers className="h-3.5 w-3.5 text-muted-foreground/40 flex-shrink-0" />
+            <Layers className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
             <span className={cn(
-              'text-xs font-medium truncate',
-              isSelected ? 'text-primary' : 'text-foreground/80'
+              'text-sm font-medium truncate',
+              isSelected ? 'text-primary' : 'text-foreground'
             )}>
               {layer.nodeName}
             </span>
-            <span className="text-[10px] text-muted-foreground/40 flex-shrink-0">
+            <span className="text-xs text-muted-foreground/50 flex-shrink-0">
               {layer.comments.length} comment{layer.comments.length !== 1 ? 's' : ''}
             </span>
             {openCount > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] text-blue-400/60 flex-shrink-0">
-                <AlertCircle className="h-2.5 w-2.5" />
+              <span className="flex items-center gap-0.5 text-xs text-blue-400/60 flex-shrink-0">
+                <AlertCircle className="h-3 w-3" />
                 {openCount}
               </span>
             )}
             {resolvedCount > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] text-emerald-400/60 flex-shrink-0">
-                <CheckCircle className="h-2.5 w-2.5" />
+              <span className="flex items-center gap-0.5 text-xs text-emerald-400/60 flex-shrink-0">
+                <CheckCircle className="h-3 w-3" />
                 {resolvedCount}
               </span>
             )}
