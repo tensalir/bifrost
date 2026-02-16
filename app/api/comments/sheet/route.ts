@@ -5,6 +5,7 @@ import {
   hasFigmaReadAccess,
   type FigmaComment,
 } from '@/src/integrations/figma/restClient'
+import { getSupabase, type DbComment } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,9 +52,10 @@ export interface CommentSheetData {
   fileName: string
   fileKey: string
   pages: CommentPageTab[]
+  syncedFromCache: boolean
 }
 
-// ── Helpers ──────────────────────────────────────────────────────
+// ── Figma helpers ────────────────────────────────────────────────
 
 function enrichComment(
   c: FigmaComment,
@@ -81,7 +83,6 @@ function enrichComment(
   }
 }
 
-/** Resolve the effective node_id for a comment (replies inherit from root parent). */
 function resolveCommentNodeId(
   c: FigmaComment,
   byId: Map<string, FigmaComment>
@@ -96,7 +97,6 @@ function resolveCommentNodeId(
   return c.client_meta?.node_id ?? null
 }
 
-/** Sort comments into thread order: top-level newest first, replies grouped after parent. */
 function sortCommentThreads(comments: EnrichedComment[]): EnrichedComment[] {
   const topLevel = comments
     .filter((c) => c.threadDepth === 0)
@@ -119,11 +119,6 @@ function sortCommentThreads(comments: EnrichedComment[]): EnrichedComment[] {
   return result
 }
 
-/**
- * Walk the full document tree and build a map of every nodeId to its parent
- * page (CANVAS) id. This lets us attribute comments on deeply nested layers
- * back to the correct page tab.
- */
 function buildNodeToPageMap(doc: FigmaTreeNode): Map<string, string> {
   const map = new Map<string, string>()
   for (const page of doc.children ?? []) {
@@ -131,24 +126,230 @@ function buildNodeToPageMap(doc: FigmaTreeNode): Map<string, string> {
     map.set(page.id, page.id)
     const walk = (node: FigmaTreeNode) => {
       map.set(node.id, page.id)
-      for (const child of node.children ?? []) {
-        walk(child)
-      }
+      for (const child of node.children ?? []) walk(child)
     }
     walk(page)
   }
   return map
 }
 
+// ── Build response from enriched comments with page info ─────────
+
+function buildSheetResponse(
+  fileName: string,
+  fileKey: string,
+  comments: (EnrichedComment & { pageId: string; pageName: string; nodeId: string | null; nodeName: string })[],
+  syncedFromCache: boolean
+): CommentSheetData {
+  // Collect page ordering
+  const pageOrder: string[] = []
+  const pageNames = new Map<string, string>()
+  for (const c of comments) {
+    if (!pageNames.has(c.pageId)) {
+      pageNames.set(c.pageId, c.pageName)
+      pageOrder.push(c.pageId)
+    }
+  }
+
+  // Group by page -> layer
+  const commentsByPage = new Map<string, Map<string, { nodeName: string; comments: EnrichedComment[] }>>()
+
+  for (const c of comments) {
+    const pid = c.pageId
+    if (!commentsByPage.has(pid)) commentsByPage.set(pid, new Map())
+    const layers = commentsByPage.get(pid)!
+    const layerKey = c.nodeId ?? '__canvas__'
+    if (!layers.has(layerKey)) layers.set(layerKey, { nodeName: c.nodeName, comments: [] })
+    layers.get(layerKey)!.comments.push(c)
+  }
+
+  const pages: CommentPageTab[] = []
+
+  for (const pid of pageOrder) {
+    const layerMap = commentsByPage.get(pid)
+    if (!layerMap || layerMap.size === 0) continue
+
+    const layers: CommentLayer[] = []
+    for (const [layerKey, bucket] of layerMap) {
+      layers.push({
+        nodeId: layerKey === '__canvas__' ? null : layerKey,
+        nodeName: bucket.nodeName,
+        thumbnailUrl: null,
+        comments: sortCommentThreads(bucket.comments),
+      })
+    }
+    layers.sort((a, b) => b.comments.length - a.comments.length)
+
+    const commentCount = layers.reduce((s, l) => s + l.comments.length, 0)
+    pages.push({
+      pageId: pid,
+      pageName: pageNames.get(pid) ?? pid,
+      layers,
+      commentCount,
+      openCount: layers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'open').length, 0),
+      resolvedCount: layers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'resolved').length, 0),
+    })
+  }
+
+  pages.sort((a, b) => {
+    if (a.pageId === '__other__') return 1
+    if (b.pageId === '__other__') return -1
+    return b.commentCount - a.commentCount
+  })
+
+  return { fileName, fileKey, pages, syncedFromCache }
+}
+
+// ── Supabase persistence helpers ─────────────────────────────────
+
+async function loadFromSupabase(fileKey: string) {
+  const sb = getSupabase()
+  if (!sb) return null
+
+  const { data: fileMeta } = await sb
+    .from('comment_files')
+    .select('file_name, last_synced_at, total_comments')
+    .eq('file_key', fileKey)
+    .single()
+
+  if (!fileMeta) return null
+
+  const { data: rows } = await sb
+    .from('comments')
+    .select('*')
+    .eq('file_key', fileKey)
+    .order('created_at', { ascending: true })
+
+  if (!rows || rows.length === 0) return null
+
+  return {
+    fileName: fileMeta.file_name as string,
+    lastSyncedAt: fileMeta.last_synced_at as string,
+    totalComments: fileMeta.total_comments as number,
+    comments: rows as DbComment[],
+  }
+}
+
+function dbToEnriched(row: DbComment): EnrichedComment & { pageId: string; pageName: string; nodeId: string | null; nodeName: string } {
+  return {
+    id: row.id,
+    orderNumber: row.order_number,
+    author: row.author,
+    authorAvatar: row.author_avatar,
+    message: row.message,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+    status: row.resolved_at ? 'resolved' : 'open',
+    threadDepth: row.thread_depth,
+    replyCount: row.reply_count,
+    parentId: row.parent_id,
+    pageId: row.page_id,
+    pageName: row.page_name,
+    nodeId: row.node_id,
+    nodeName: row.node_name,
+  }
+}
+
+async function storeToSupabase(
+  fileKey: string,
+  fileName: string,
+  enrichedComments: (EnrichedComment & { pageId: string; pageName: string; nodeId: string | null; nodeName: string })[]
+) {
+  const sb = getSupabase()
+  if (!sb) return
+
+  // Upsert the file record
+  await sb.from('comment_files').upsert({
+    file_key: fileKey,
+    file_name: fileName,
+    last_synced_at: new Date().toISOString(),
+    total_comments: enrichedComments.length,
+  })
+
+  // Upsert comments in batches of 100
+  const rows: DbComment[] = enrichedComments.map((c) => ({
+    id: c.id,
+    file_key: fileKey,
+    page_id: c.pageId,
+    page_name: c.pageName,
+    node_id: c.nodeId,
+    node_name: c.nodeName,
+    parent_id: c.parentId,
+    order_number: c.orderNumber,
+    author: c.author,
+    author_avatar: c.authorAvatar,
+    message: c.message,
+    created_at: c.createdAt,
+    resolved_at: c.resolvedAt,
+    thread_depth: c.threadDepth,
+    reply_count: c.replyCount,
+  }))
+
+  for (let i = 0; i < rows.length; i += 100) {
+    await sb.from('comments').upsert(rows.slice(i, i + 100))
+  }
+}
+
+// ── Full Figma fetch + enrichment ────────────────────────────────
+
+async function fullFigmaFetch(fileKey: string) {
+  const [rawComments, fileMeta] = await Promise.all([
+    getFileComments(fileKey, { asMarkdown: true }),
+    getFile(fileKey),
+  ])
+
+  if (!fileMeta || !fileMeta.document) {
+    throw new Error('Could not fetch file metadata')
+  }
+
+  const fileName = fileMeta.name
+  const doc = fileMeta.document as unknown as FigmaTreeNode
+
+  const pageMap = new Map<string, string>()
+  const pageOrder: string[] = []
+  for (const page of (doc.children ?? []) as FigmaTreeNode[]) {
+    if (page.type !== 'CANVAS') continue
+    pageMap.set(page.id, page.name)
+    pageOrder.push(page.id)
+  }
+
+  const nodeToPage = buildNodeToPageMap(doc)
+
+  const byId = new Map<string, FigmaComment>()
+  for (const c of rawComments) byId.set(c.id, c)
+
+  const replyCounts = new Map<string, number>()
+  for (const c of rawComments) {
+    if (c.parent_id) {
+      replyCounts.set(c.parent_id, (replyCounts.get(c.parent_id) ?? 0) + 1)
+    }
+  }
+
+  type FullComment = EnrichedComment & { pageId: string; pageName: string; nodeId: string | null; nodeName: string }
+  const enrichedComments: FullComment[] = []
+
+  for (const c of rawComments) {
+    const enriched = enrichComment(c, byId, replyCounts)
+    const nodeId = resolveCommentNodeId(c, byId)
+    const resolvedPageId = nodeId ? nodeToPage.get(nodeId) : undefined
+    const pageId = resolvedPageId ?? '__other__'
+    const pageName = pageMap.get(pageId) ?? 'All Comments'
+
+    let nodeName = 'Canvas'
+    if (nodeId && pageMap.has(nodeId)) {
+      nodeName = `${pageMap.get(nodeId)} (page)`
+    } else if (nodeId) {
+      nodeName = `Layer ${nodeId}`
+    }
+
+    enrichedComments.push({ ...enriched, pageId, pageName, nodeId, nodeName })
+  }
+
+  return { fileName, enrichedComments, rawIds: new Set(rawComments.map((c) => c.id)) }
+}
+
 // ── Route Handler ────────────────────────────────────────────────
 
-/**
- * GET /api/comments/sheet?fileKey=...
- *
- * Returns CommentSheetData: comments grouped by node ID.
- * Uses only 2 Figma API calls (comments + file tree at depth 1) for speed.
- * Thumbnails are loaded on-demand via /api/comments/thumbnail.
- */
 export async function GET(req: NextRequest) {
   const fileKey = new URL(req.url).searchParams.get('fileKey')
   if (!fileKey) {
@@ -159,141 +360,47 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 2 Figma API calls: comments + full file tree (needed to resolve node → page)
-    const [rawComments, fileMeta] = await Promise.all([
-      getFileComments(fileKey, { asMarkdown: true }),
-      getFile(fileKey),
-    ])
+    // Step 1: Check Supabase cache
+    const cached = await loadFromSupabase(fileKey)
 
-    if (!fileMeta || !fileMeta.document) {
-      return NextResponse.json({ error: 'Could not fetch file metadata' }, { status: 502 })
-    }
+    // Step 2: Fetch current comments from Figma (fast — just comment JSON)
+    const rawComments = await getFileComments(fileKey, { asMarkdown: true })
+    const figmaIds = new Set(rawComments.map((c) => c.id))
 
-    const fileName = fileMeta.name
-    const doc = fileMeta.document as unknown as FigmaTreeNode
+    // Step 3: Compare — any new or changed comments?
+    if (cached && cached.comments.length > 0) {
+      const cachedIds = new Set(cached.comments.map((c) => c.id))
+      const newIds = [...figmaIds].filter((id) => !cachedIds.has(id))
 
-    // Build page map from document tree
-    const pageMap = new Map<string, string>()
-    const pageOrder: string[] = []
-    for (const page of (doc.children ?? []) as FigmaTreeNode[]) {
-      if (page.type !== 'CANVAS') continue
-      pageMap.set(page.id, page.name)
-      pageOrder.push(page.id)
-    }
-
-    // Build nodeId → pageId lookup from full tree so we can attribute
-    // comments on any nested layer back to its parent page.
-    const nodeToPage = buildNodeToPageMap(doc)
-
-    // Build comment lookup maps
-    const byId = new Map<string, FigmaComment>()
-    for (const c of rawComments) byId.set(c.id, c)
-
-    const replyCounts = new Map<string, number>()
-    for (const c of rawComments) {
-      if (c.parent_id) {
-        replyCounts.set(c.parent_id, (replyCounts.get(c.parent_id) ?? 0) + 1)
-      }
-    }
-
-    // Group comments by node ID (layer).
-    // Comments on a page itself (nodeId = pageId) are grouped as "Page Canvas".
-    // Comments with unknown nodeIds get a label like "Comment #N".
-    type LayerBucket = { nodeName: string; comments: EnrichedComment[] }
-    const layerBuckets = new Map<string, LayerBucket>()
-
-    for (const c of rawComments) {
-      const enriched = enrichComment(c, byId, replyCounts)
-      const nodeId = resolveCommentNodeId(c, byId)
-      const layerKey = nodeId ?? '__canvas__'
-
-      if (!layerBuckets.has(layerKey)) {
-        let nodeName = 'Canvas'
-        if (nodeId && pageMap.has(nodeId)) {
-          nodeName = `${pageMap.get(nodeId)} (page)`
-        } else if (nodeId) {
-          nodeName = `Layer ${nodeId}`
+      // Check for resolved_at changes
+      const cachedById = new Map(cached.comments.map((c) => [c.id, c]))
+      const changedIds: string[] = []
+      for (const fc of rawComments) {
+        const cc = cachedById.get(fc.id)
+        if (cc && ((fc.resolved_at ?? null) !== (cc.resolved_at ?? null))) {
+          changedIds.push(fc.id)
         }
-        layerBuckets.set(layerKey, { nodeName, comments: [] })
-      }
-      layerBuckets.get(layerKey)!.comments.push(enriched)
-    }
-
-    // Now build page tabs.
-    // Strategy: put comments on a page if their nodeId IS a page,
-    // or if many comments share the same nodeId range as a page.
-    // For the MVP, all comments with resolvable page nodeIds go to that page,
-    // and all others go to a single "All Comments" tab.
-    const commentsByPage = new Map<string, CommentLayer[]>()
-
-    // Initialize all pages
-    for (const pageId of pageOrder) {
-      commentsByPage.set(pageId, [])
-    }
-    commentsByPage.set('__other__', [])
-
-    for (const [layerKey, bucket] of layerBuckets) {
-      const sorted = sortCommentThreads(bucket.comments)
-      const layer: CommentLayer = {
-        nodeId: layerKey === '__canvas__' ? null : layerKey,
-        nodeName: bucket.nodeName,
-        thumbnailUrl: null, // loaded on-demand by the UI
-        comments: sorted,
       }
 
-      // Resolve which page this layer belongs to via the full tree lookup
-      const resolvedPageId = layerKey !== '__canvas__' ? nodeToPage.get(layerKey) : undefined
+      const hasChanges = newIds.length > 0 || changedIds.length > 0
 
-      if (resolvedPageId && commentsByPage.has(resolvedPageId)) {
-        commentsByPage.get(resolvedPageId)!.push(layer)
-      } else {
-        commentsByPage.get('__other__')!.push(layer)
+      if (!hasChanges) {
+        // No changes — return from cache directly (skip file tree fetch)
+        const enriched = cached.comments.map(dbToEnriched)
+        const result = buildSheetResponse(cached.fileName, fileKey, enriched, true)
+        return NextResponse.json(result)
       }
     }
 
-    // Build final page tabs
-    const pages: CommentPageTab[] = []
-
-    for (const pageId of pageOrder) {
-      const layers = commentsByPage.get(pageId) ?? []
-      if (layers.length === 0) continue
-
-      const commentCount = layers.reduce((s, l) => s + l.comments.length, 0)
-      layers.sort((a, b) => b.comments.length - a.comments.length)
-
-      pages.push({
-        pageId,
-        pageName: pageMap.get(pageId) ?? pageId,
-        layers,
-        commentCount,
-        openCount: layers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'open').length, 0),
-        resolvedCount: layers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'resolved').length, 0),
-      })
-    }
-
-    // "Other Comments" — all comments we couldn't map to a specific page
-    const otherLayers = commentsByPage.get('__other__') ?? []
-    if (otherLayers.length > 0) {
-      otherLayers.sort((a, b) => b.comments.length - a.comments.length)
-      const commentCount = otherLayers.reduce((s, l) => s + l.comments.length, 0)
-      pages.push({
-        pageId: '__other__',
-        pageName: 'All Comments',
-        layers: otherLayers,
-        commentCount,
-        openCount: otherLayers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'open').length, 0),
-        resolvedCount: otherLayers.reduce((s, l) => s + l.comments.filter((c) => c.status === 'resolved').length, 0),
-      })
-    }
-
-    // Sort: pages with most comments first, "Other" at the end
-    pages.sort((a, b) => {
-      if (a.pageId === '__other__') return 1
-      if (b.pageId === '__other__') return -1
-      return b.commentCount - a.commentCount
+    // Step 4: Changes found (or no cache) — full fetch + store
+    const { fileName, enrichedComments } = await fullFigmaFetch(fileKey)
+    
+    // Store to Supabase in background (don't block response)
+    storeToSupabase(fileKey, fileName, enrichedComments).catch((e) => {
+      console.error('[Heimdall] Failed to persist comments to Supabase:', e)
     })
 
-    const result: CommentSheetData = { fileName, fileKey, pages }
+    const result = buildSheetResponse(fileName, fileKey, enrichedComments, false)
     return NextResponse.json(result)
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown error'

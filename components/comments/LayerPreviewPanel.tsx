@@ -8,6 +8,7 @@ import {
   Loader2,
   Image as ImageIcon,
   Layers,
+  Sparkles,
 } from 'lucide-react'
 
 interface LayerPreviewPanelProps {
@@ -21,6 +22,8 @@ interface LayerPreviewPanelProps {
   latestTime?: string
   fileKey: string
   commentMessages: string[]
+  summary?: string
+  summaryLoading?: boolean
 }
 
 export function LayerPreviewPanel({
@@ -33,18 +36,18 @@ export function LayerPreviewPanel({
   latestAuthor,
   latestTime,
   fileKey,
+  summary,
+  summaryLoading,
 }: LayerPreviewPanelProps) {
   const [imageError, setImageError] = useState(false)
   const [dynamicThumbnail, setDynamicThumbnail] = useState<string | null>(null)
   const [thumbnailLoading, setThumbnailLoading] = useState(false)
 
-  // Reset state when layer changes
   useEffect(() => {
     setImageError(false)
     setDynamicThumbnail(null)
   }, [nodeId])
 
-  // Fetch thumbnail on-demand when no thumbnailUrl is provided
   useEffect(() => {
     if (thumbnailUrl || !nodeId || dynamicThumbnail) return
     setThumbnailLoading(true)
@@ -78,7 +81,6 @@ export function LayerPreviewPanel({
           </h3>
         </div>
 
-        {/* Stat row */}
         <div className="flex items-center gap-3 text-[11px] text-muted-foreground/60">
           <span className="flex items-center gap-1">
             <MessageSquare className="h-3 w-3" />
@@ -106,7 +108,31 @@ export function LayerPreviewPanel({
         )}
       </div>
 
-      {/* Large layer thumbnail */}
+      {/* AI Summary */}
+      {(summary || summaryLoading) && (
+        <div className="flex flex-col gap-1.5 rounded-lg border border-border/30 bg-muted/10 px-3 py-2.5">
+          <div className="flex items-center gap-1.5">
+            {summaryLoading && !summary ? (
+              <Loader2 className="h-3 w-3 text-muted-foreground/30 animate-spin" />
+            ) : (
+              <Sparkles className="h-3 w-3 text-primary/50" />
+            )}
+            <span className="text-[10px] uppercase tracking-wider text-primary/40 font-medium">
+              Summary
+            </span>
+          </div>
+          {summary ? (
+            <p className="text-[13px] leading-relaxed text-foreground/70">{summary}</p>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="h-3 bg-muted/20 rounded animate-pulse w-full" />
+              <div className="h-3 bg-muted/20 rounded animate-pulse w-4/5" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Layer thumbnail */}
       <div className="flex-1 min-h-0 rounded-lg overflow-hidden border border-border/30 bg-muted/10 flex items-center justify-center">
         {proxyUrl && !imageError ? (
           <img

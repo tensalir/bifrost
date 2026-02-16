@@ -81,6 +81,7 @@ type SummaryMap = Record<string, string>
  */
 async function fetchSummariesWithConcurrency(
   layers: CommentLayer[],
+  fileKey: string,
   concurrency: number,
   onResult: (nodeKey: string, summary: string) => void
 ) {
@@ -88,6 +89,7 @@ async function fetchSummariesWithConcurrency(
     .filter((l) => l.comments.length > 0)
     .map((l) => ({
       nodeKey: l.nodeId ?? '__canvas__',
+      nodeId: l.nodeId,
       nodeName: l.nodeName,
       messages: l.comments.map((c) => `${c.author}: ${c.message}`),
     }))
@@ -100,7 +102,12 @@ async function fetchSummariesWithConcurrency(
         const res = await fetch('/api/comments/summarize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments: item.messages, nodeName: item.nodeName }),
+          body: JSON.stringify({
+            comments: item.messages,
+            nodeName: item.nodeName,
+            fileKey,
+            nodeId: item.nodeId ?? '__canvas__',
+          }),
         })
         if (res.ok) {
           const data = await res.json()
@@ -188,7 +195,7 @@ export function CommentSheet({ data }: CommentSheetProps) {
 
     const pageSummaries: SummaryMap = {}
 
-    fetchSummariesWithConcurrency(layers, 3, (nodeKey, summary) => {
+    fetchSummariesWithConcurrency(layers, data.fileKey, 3, (nodeKey, summary) => {
       pageSummaries[nodeKey] = summary
       // Progressive update: each summary appears as it arrives
       setSummaryCache((prev) => ({
@@ -250,6 +257,8 @@ export function CommentSheet({ data }: CommentSheetProps) {
               latestTime={latestComment ? formatRelativeTime(latestComment.createdAt) : undefined}
               fileKey={data.fileKey}
               commentMessages={layerCommentMessages}
+              summary={currentSummaries[selectedLayer.nodeId ?? '__canvas__']}
+              summaryLoading={areSummariesLoading}
             />
           )}
         </aside>
