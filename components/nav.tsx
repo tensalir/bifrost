@@ -49,6 +49,7 @@ export function Nav() {
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient()
+    if (!supabase) return
     supabase.auth.getUser().then(({ data: { user } }) => {
       setUserEmail(user?.email ?? null)
     })
@@ -56,6 +57,7 @@ export function Nav() {
 
   const handleSignOut = async () => {
     const supabase = createSupabaseBrowserClient()
+    if (!supabase) return
     await supabase.auth.signOut()
     router.push('/admin/login')
     router.refresh()

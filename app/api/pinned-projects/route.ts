@@ -9,8 +9,9 @@ import { getSupabase } from '@/lib/supabase'
  */
 export async function GET(request: Request) {
   const { supabase: authClient } = createSupabaseRouteClient(request)
-  const { data: { user } } = await authClient.auth.getUser()
+  if (!authClient) return NextResponse.json({ pinnedProjectIds: [] })
 
+  const { data: { user } } = await authClient.auth.getUser()
   if (!user) {
     return NextResponse.json({ pinnedProjectIds: [] })
   }
@@ -44,8 +45,9 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   const { supabase: authClient } = createSupabaseRouteClient(request)
-  const { data: { user } } = await authClient.auth.getUser()
+  if (!authClient) return NextResponse.json({ error: 'Auth not configured' }, { status: 500 })
 
+  const { data: { user } } = await authClient.auth.getUser()
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
@@ -89,8 +91,9 @@ export async function POST(request: Request) {
  */
 export async function DELETE(request: Request) {
   const { supabase: authClient } = createSupabaseRouteClient(request)
-  const { data: { user } } = await authClient.auth.getUser()
+  if (!authClient) return NextResponse.json({ error: 'Auth not configured' }, { status: 500 })
 
+  const { data: { user } } = await authClient.auth.getUser()
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }

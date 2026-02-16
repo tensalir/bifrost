@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-auth'
-import { Shield, Mail, KeyRound, Loader2 } from 'lucide-react'
+import { Shield, Mail, KeyRound, Loader2, AlertCircle } from 'lucide-react'
 
 function LoginForm() {
   const router = useRouter()
@@ -19,6 +19,23 @@ function LoginForm() {
   const [magicLinkSent, setMagicLinkSent] = useState(false)
 
   const supabase = createSupabaseBrowserClient()
+
+  if (!supabase) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-full max-w-sm mx-4 text-center">
+          <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 rounded-2xl bg-destructive/10 border border-destructive/20">
+            <AlertCircle className="h-6 w-6 text-destructive" />
+          </div>
+          <h1 className="text-xl font-semibold text-foreground mb-2">Auth Not Configured</h1>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Set <code className="text-xs bg-muted px-1.5 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to enable authentication.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const handleMagicLink = async (e: React.FormEvent) => {
     e.preventDefault()
