@@ -1,7 +1,7 @@
 import type { PendingSyncJob, PendingSyncJobState } from '../src/jobs/types.js'
 
 /**
- * Vercel KV persistence layer for Bifrost.
+ * Vercel KV persistence layer for Heimdall.
  * Replaces the in-memory queue with Redis-backed storage.
  * Falls back to in-memory storage when KV env vars are missing (local dev).
  */
@@ -12,15 +12,15 @@ import type { PendingSyncJob, PendingSyncJobState } from '../src/jobs/types.js'
 // Use globalThis to persist across Next.js HMR reloads in dev mode.
 // Without this, module reloads clear the Maps and all queued jobs vanish.
 const g = globalThis as unknown as {
-  _bifrostMemStore?: Map<string, unknown>
-  _bifrostMemSets?: Map<string, Set<string>>
-  _bifrostMemSorted?: Map<string, { score: number; member: string }[]>
-  _bifrostMemLists?: Map<string, string[]>
+  _heimdallMemStore?: Map<string, unknown>
+  _heimdallMemSets?: Map<string, Set<string>>
+  _heimdallMemSorted?: Map<string, { score: number; member: string }[]>
+  _heimdallMemLists?: Map<string, string[]>
 }
-const memStore = g._bifrostMemStore ?? (g._bifrostMemStore = new Map<string, unknown>())
-const memSets = g._bifrostMemSets ?? (g._bifrostMemSets = new Map<string, Set<string>>())
-const memSorted = g._bifrostMemSorted ?? (g._bifrostMemSorted = new Map<string, { score: number; member: string }[]>())
-const memLists = g._bifrostMemLists ?? (g._bifrostMemLists = new Map<string, string[]>())
+const memStore = g._heimdallMemStore ?? (g._heimdallMemStore = new Map<string, unknown>())
+const memSets = g._heimdallMemSets ?? (g._heimdallMemSets = new Map<string, Set<string>>())
+const memSorted = g._heimdallMemSorted ?? (g._heimdallMemSorted = new Map<string, { score: number; member: string }[]>())
+const memLists = g._heimdallMemLists ?? (g._heimdallMemLists = new Map<string, string[]>())
 
 function getSet(key: string): Set<string> {
   if (!memSets.has(key)) memSets.set(key, new Set())
@@ -139,56 +139,56 @@ export async function enqueueJob(job: PendingSyncJob): Promise<void> {
   const { id, idempotencyKey, state, batchCanonical, figmaFileKey, createdAt } = job
   
   // Store job data
-  await kvSet(`bifrost:job:${id}`, JSON.stringify(job))
+  await kvSet(`heimdall:job:${id}`, JSON.stringify(job))
   
   // Add to global sorted set (score = timestamp)
-  await kvZadd('bifrost:jobs:all', { score: new Date(createdAt).getTime(), member: id })
+  await kvZadd('heimdall:jobs:all', { score: new Date(createdAt).getTime(), member: id })
   
   // Add to state index
-  await kvSadd(`bifrost:jobs:state:${state}`, id)
+  await kvSadd(`heimdall:jobs:state:${state}`, id)
   
   // Add to batch index
-  await kvSadd(`bifrost:jobs:batch:${batchCanonical}`, id)
+  await kvSadd(`heimdall:jobs:batch:${batchCanonical}`, id)
   
   // Add to file key index
   if (figmaFileKey) {
-    await kvSadd(`bifrost:jobs:fileKey:${figmaFileKey}`, id)
+    await kvSadd(`heimdall:jobs:fileKey:${figmaFileKey}`, id)
   }
   
   // Store idempotency mapping
-  await kvSet(`bifrost:jobs:idempotency:${idempotencyKey}`, id)
+  await kvSet(`heimdall:jobs:idempotency:${idempotencyKey}`, id)
 }
 
 export async function getJobById(id: string): Promise<PendingSyncJob | null> {
-  const data = await kvGet(`bifrost:job:${id}`)
+  const data = await kvGet(`heimdall:job:${id}`)
   return data ? JSON.parse(data) : null
 }
 
 export async function getJobByIdempotencyKey(key: string): Promise<PendingSyncJob | null> {
-  const id = await kvGet(`bifrost:jobs:idempotency:${key}`)
+  const id = await kvGet(`heimdall:jobs:idempotency:${key}`)
   return id ? getJobById(id) : null
 }
 
 export async function getAllJobs(limit = 100): Promise<PendingSyncJob[]> {
-  const ids = await kvZrange('bifrost:jobs:all', 0, limit - 1, { rev: true })
+  const ids = await kvZrange('heimdall:jobs:all', 0, limit - 1, { rev: true })
   const jobs = await Promise.all(ids.map((id: string) => getJobById(id)))
   return jobs.filter((j): j is PendingSyncJob => j !== null)
 }
 
 export async function getJobsByState(state: PendingSyncJobState, limit = 100): Promise<PendingSyncJob[]> {
-  const ids = await kvSmembers(`bifrost:jobs:state:${state}`)
+  const ids = await kvSmembers(`heimdall:jobs:state:${state}`)
   const jobs = await Promise.all(ids.slice(0, limit).map((id: string) => getJobById(id)))
   return jobs.filter((j): j is PendingSyncJob => j !== null)
 }
 
 export async function getJobsByFileKey(fileKey: string, limit = 100): Promise<PendingSyncJob[]> {
-  const ids = await kvSmembers(`bifrost:jobs:fileKey:${fileKey}`)
+  const ids = await kvSmembers(`heimdall:jobs:fileKey:${fileKey}`)
   const jobs = await Promise.all(ids.slice(0, limit).map((id: string) => getJobById(id)))
   return jobs.filter((j): j is PendingSyncJob => j !== null)
 }
 
 export async function getJobsByBatch(batchCanonical: string, limit = 100): Promise<PendingSyncJob[]> {
-  const ids = await kvSmembers(`bifrost:jobs:batch:${batchCanonical}`)
+  const ids = await kvSmembers(`heimdall:jobs:batch:${batchCanonical}`)
   const jobs = await Promise.all(ids.slice(0, limit).map((id: string) => getJobById(id)))
   return jobs.filter((j): j is PendingSyncJob => j !== null)
 }
@@ -210,12 +210,12 @@ export async function updateJobState(
   }
   
   // Update job data
-  await kvSet(`bifrost:job:${id}`, JSON.stringify(updatedJob))
+  await kvSet(`heimdall:job:${id}`, JSON.stringify(updatedJob))
   
   // Update state indices
   if (oldState !== newState) {
-    await kvSrem(`bifrost:jobs:state:${oldState}`, id)
-    await kvSadd(`bifrost:jobs:state:${newState}`, id)
+    await kvSrem(`heimdall:jobs:state:${oldState}`, id)
+    await kvSadd(`heimdall:jobs:state:${newState}`, id)
   }
 }
 
@@ -224,14 +224,14 @@ export async function deleteJob(id: string): Promise<void> {
   if (!job) return
   
   // Remove from all indices
-  await kvDel(`bifrost:job:${id}`)
-  await kvZrem('bifrost:jobs:all', id)
-  await kvSrem(`bifrost:jobs:state:${job.state}`, id)
-  await kvSrem(`bifrost:jobs:batch:${job.batchCanonical}`, id)
+  await kvDel(`heimdall:job:${id}`)
+  await kvZrem('heimdall:jobs:all', id)
+  await kvSrem(`heimdall:jobs:state:${job.state}`, id)
+  await kvSrem(`heimdall:jobs:batch:${job.batchCanonical}`, id)
   if (job.figmaFileKey) {
-    await kvSrem(`bifrost:jobs:fileKey:${job.figmaFileKey}`, id)
+    await kvSrem(`heimdall:jobs:fileKey:${job.figmaFileKey}`, id)
   }
-  await kvDel(`bifrost:jobs:idempotency:${job.idempotencyKey}`)
+  await kvDel(`heimdall:jobs:idempotency:${job.idempotencyKey}`)
 }
 
 // ============================================================================
@@ -249,23 +249,23 @@ export interface FilterSettings {
 }
 
 export async function getRoutingMap(): Promise<RoutingMap> {
-  const data = await kvGet('bifrost:settings:routing')
+  const data = await kvGet('heimdall:settings:routing')
   return data ? JSON.parse(data) : {}
 }
 
 export async function setRoutingMap(map: RoutingMap): Promise<void> {
-  await kvSet('bifrost:settings:routing', JSON.stringify(map))
+  await kvSet('heimdall:settings:routing', JSON.stringify(map))
 }
 
 export async function getFilterSettings(): Promise<FilterSettings> {
-  const data = await kvGet('bifrost:settings:filters')
+  const data = await kvGet('heimdall:settings:filters')
   return data
     ? JSON.parse(data)
     : { enforceFilters: false, allowedStatuses: [], allowedTeams: [] }
 }
 
 export async function setFilterSettings(settings: FilterSettings): Promise<void> {
-  await kvSet('bifrost:settings:filters', JSON.stringify(settings))
+  await kvSet('heimdall:settings:filters', JSON.stringify(settings))
 }
 
 // ============================================================================
@@ -282,15 +282,65 @@ export interface WebhookLogEntry {
 }
 
 export async function logWebhook(entry: WebhookLogEntry): Promise<void> {
-  await kvLpush('bifrost:webhooks:log', JSON.stringify(entry))
+  await kvLpush('heimdall:webhooks:log', JSON.stringify(entry))
   // Cap at 200 entries
-  await kvLtrim('bifrost:webhooks:log', 0, 199)
+  await kvLtrim('heimdall:webhooks:log', 0, 199)
 }
 
 export async function getWebhookLog(limit = 20): Promise<WebhookLogEntry[]> {
-  const entries = await kvLrange('bifrost:webhooks:log', 0, limit - 1)
+  const entries = await kvLrange('heimdall:webhooks:log', 0, limit - 1)
   if (!entries || !Array.isArray(entries)) return []
   return entries.map((e) => JSON.parse(String(e)))
+}
+
+// ============================================================================
+// STRUCTURED LOGS (for error logging / audit)
+// ============================================================================
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogCategory = 'webhook' | 'mapping' | 'queue' | 'figma' | 'api' | 'system'
+
+export interface LogEntry {
+  id: string
+  timestamp: string
+  level: LogLevel
+  category: LogCategory
+  message: string
+  context?: Record<string, unknown>
+  error?: { message: string; stack?: string; code?: string }
+  duration?: number
+}
+
+const LOG_CAP = 500
+
+export async function appendLog(entry: LogEntry): Promise<void> {
+  await kvLpush('heimdall:logs', JSON.stringify(entry))
+  await kvLtrim('heimdall:logs', 0, LOG_CAP - 1)
+}
+
+export async function getLogs(opts: {
+  level?: LogLevel
+  category?: LogCategory
+  limit?: number
+}): Promise<LogEntry[]> {
+  const limit = opts.limit ?? 50
+  const raw = await kvLrange('heimdall:logs', 0, limit - 1)
+  if (!raw || !Array.isArray(raw)) return []
+  const entries = raw.map((e) => JSON.parse(String(e)) as LogEntry)
+  let result = entries
+  if (opts.level) result = result.filter((e) => e.level === opts.level)
+  if (opts.category) result = result.filter((e) => e.category === opts.category)
+  return result
+}
+
+export async function getLogById(id: string): Promise<LogEntry | null> {
+  const raw = await kvLrange('heimdall:logs', 0, LOG_CAP - 1)
+  if (!raw || !Array.isArray(raw)) return null
+  for (const e of raw) {
+    const entry = JSON.parse(String(e)) as LogEntry
+    if (entry.id === id) return entry
+  }
+  return null
 }
 
 // ============================================================================
@@ -299,12 +349,46 @@ export async function getWebhookLog(limit = 20): Promise<WebhookLogEntry[]> {
 
 export async function getQueueStats() {
   const [queued, running, completed, failed, totalCount] = await Promise.all([
-    kvScard(`bifrost:jobs:state:queued`),
-    kvScard(`bifrost:jobs:state:running`),
-    kvScard(`bifrost:jobs:state:completed`),
-    kvScard(`bifrost:jobs:state:failed`),
-    kvZcard('bifrost:jobs:all'),
+    kvScard(`heimdall:jobs:state:queued`),
+    kvScard(`heimdall:jobs:state:running`),
+    kvScard(`heimdall:jobs:state:completed`),
+    kvScard(`heimdall:jobs:state:failed`),
+    kvZcard('heimdall:jobs:all'),
   ])
   
   return { queued, running, completed, failed, total: totalCount }
+}
+
+// ============================================================================
+// BATCH STATS (jobs grouped by batch for dashboard)
+// ============================================================================
+
+export interface BatchStats {
+  batchCanonical: string
+  queued: number
+  running: number
+  completed: number
+  failed: number
+  total: number
+}
+
+export async function getBatchStats(): Promise<BatchStats[]> {
+  const allJobs = await getAllJobs(500)
+  const byBatch = new Map<string, { queued: number; running: number; completed: number; failed: number }>()
+  for (const job of allJobs) {
+    const key = job.batchCanonical
+    if (!byBatch.has(key)) byBatch.set(key, { queued: 0, running: 0, completed: 0, failed: 0 })
+    const b = byBatch.get(key)!
+    if (job.state === 'queued') b.queued++
+    else if (job.state === 'running') b.running++
+    else if (job.state === 'completed') b.completed++
+    else b.failed++
+  }
+  return Array.from(byBatch.entries())
+    .map(([batchCanonical, counts]) => ({
+      batchCanonical,
+      ...counts,
+      total: counts.queued + counts.running + counts.completed + counts.failed,
+    }))
+    .sort((a, b) => b.batchCanonical.localeCompare(a.batchCanonical))
 }

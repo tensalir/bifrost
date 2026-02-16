@@ -1,9 +1,9 @@
 ---
-name: bifrost-mapping
-description: Maps Monday.com experiment item data and optional Brief doc content onto Figma briefing template node names. Use when generating textMappings and frameRenames for Bifrost sync jobs, or when the user asks to map Monday fields to Figma template fields.
+name: heimdall-mapping
+description: Maps Monday.com experiment item data and optional Brief doc content onto Figma briefing template node names. Use when generating textMappings and frameRenames for Heimdall sync jobs, or when the user asks to map Monday fields to Figma template fields.
 ---
 
-# Bifrost Monday-to-Figma Mapping
+# Heimdall Monday-to-Figma Mapping
 
 ## Output format
 

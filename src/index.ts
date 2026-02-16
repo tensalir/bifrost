@@ -1,5 +1,5 @@
 /**
- * Bifrost: Monday status -> Figma experiment page automation.
+ * Heimdall: Monday status -> Figma experiment page automation.
  */
 
 export { parseBatchToCanonical, expectedFileNameFromCanonicalKey } from './domain/routing/batchToFile.js'

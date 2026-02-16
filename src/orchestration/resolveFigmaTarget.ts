@@ -18,11 +18,11 @@ export interface FigmaTargetResult {
 }
 
 /**
- * Load batch -> file key map from env BIFROST_BATCH_FILE_MAP (JSON object).
+ * Load batch -> file key map from env HEIMDALL_BATCH_FILE_MAP (JSON object).
  */
 function loadBatchFileMap(): Record<string, string> {
   const env = getEnv()
-  const raw = env.BIFROST_BATCH_FILE_MAP
+  const raw = env.HEIMDALL_BATCH_FILE_MAP
   if (!raw || typeof raw !== 'string') return {}
   try {
     const parsed = JSON.parse(raw) as unknown

@@ -1,5 +1,5 @@
 /**
- * Monday.com API client for Bifrost.
+ * Monday.com API client for Heimdall.
  * Webhook payload types and optional GraphQL for item/column fetch.
  */
 

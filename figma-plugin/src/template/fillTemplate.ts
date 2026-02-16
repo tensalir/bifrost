@@ -1,6 +1,6 @@
 /**
  * Fill template nodes from briefing payload.
- * Uses placeholder IDs (plugin data key "bifrostId") to find text nodes and set characters.
+ * Uses placeholder IDs (plugin data key "heimdallId") to find text nodes and set characters.
  * Auto-resize: set text node textAutoResize to HEIGHT to grow with content.
  */
 
@@ -25,54 +25,54 @@ export interface BriefingPayload {
 export function getPlaceholderValue(placeholderId: string, briefing: BriefingPayload): string {
   const v = briefing.variants ?? []
   switch (placeholderId) {
-    case 'bifrost:exp_name':
+    case 'heimdall:exp_name':
       return briefing.experimentName ?? ''
-    case 'bifrost:idea':
+    case 'heimdall:idea':
       return briefing.idea ?? ''
-    case 'bifrost:audience_region':
+    case 'heimdall:audience_region':
       return briefing.audienceRegion ?? ''
-    case 'bifrost:segment':
+    case 'heimdall:segment':
       return briefing.segment ?? ''
-    case 'bifrost:formats':
+    case 'heimdall:formats':
       return briefing.formats ?? ''
-    case 'bifrost:var_a_headline':
+    case 'heimdall:var_a_headline':
       return v[0]?.headline ?? ''
-    case 'bifrost:var_a_subline':
+    case 'heimdall:var_a_subline':
       return v[0]?.subline ?? ''
-    case 'bifrost:var_a_cta':
+    case 'heimdall:var_a_cta':
       return v[0]?.cta ?? ''
-    case 'bifrost:var_b_headline':
+    case 'heimdall:var_b_headline':
       return v[1]?.headline ?? ''
-    case 'bifrost:var_b_subline':
+    case 'heimdall:var_b_subline':
       return v[1]?.subline ?? ''
-    case 'bifrost:var_b_cta':
+    case 'heimdall:var_b_cta':
       return v[1]?.cta ?? ''
-    case 'bifrost:var_c_headline':
+    case 'heimdall:var_c_headline':
       return v[2]?.headline ?? ''
-    case 'bifrost:var_c_subline':
+    case 'heimdall:var_c_subline':
       return v[2]?.subline ?? ''
-    case 'bifrost:var_c_cta':
+    case 'heimdall:var_c_cta':
       return v[2]?.cta ?? ''
-    case 'bifrost:var_d_headline':
+    case 'heimdall:var_d_headline':
       return v[3]?.headline ?? ''
-    case 'bifrost:var_d_subline':
+    case 'heimdall:var_d_subline':
       return v[3]?.subline ?? ''
-    case 'bifrost:var_d_cta':
+    case 'heimdall:var_d_cta':
       return v[3]?.cta ?? ''
     default:
       return ''
   }
 }
 
-/** Recursively find text nodes and fill by plugin data "bifrostId". */
+/** Recursively find text nodes and fill by plugin data "heimdallId". */
 export function fillTextNodes(
   node: SceneNode,
   briefing: BriefingPayload
 ): void {
   if (node.type === 'TEXT') {
-    const bifrostId = (node as TextNode).getPluginData?.('bifrostId') ?? (node as TextNode).getPluginData?.('placeholderId')
-    if (bifrostId) {
-      const value = getPlaceholderValue(bifrostId, briefing)
+    const heimdallId = (node as TextNode).getPluginData?.('heimdallId') ?? (node as TextNode).getPluginData?.('placeholderId')
+    if (heimdallId) {
+      const value = getPlaceholderValue(heimdallId, briefing)
       try {
         ;(node as TextNode).characters = value
         ;(node as TextNode).textAutoResize = 'HEIGHT'

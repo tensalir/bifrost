@@ -1,8 +1,8 @@
-# Bifrost Admin Panel Implementation Summary
+# Heimdall Admin Panel Implementation Summary
 
 ## What Was Built
 
-A complete Next.js admin panel with Vercel KV persistence to replace the local dev server, transforming Bifrost from a development prototype into a production-ready system.
+A complete Next.js admin panel with Vercel KV persistence to replace the local dev server, transforming Heimdall from a development prototype into a production-ready system.
 
 ## ✅ Completed Features
 
@@ -26,15 +26,15 @@ Replaced in-memory Map with Redis-backed persistent storage:
 
 **Data Model**:
 ```
-bifrost:job:{id}                  -> JSON (PendingSyncJob)
-bifrost:jobs:all                  -> Sorted Set (score=timestamp)
-bifrost:jobs:state:{state}        -> Set of job IDs
-bifrost:jobs:fileKey:{key}        -> Set of job IDs
-bifrost:jobs:batch:{canonical}    -> Set of job IDs
-bifrost:jobs:idempotency:{key}    -> job ID string
-bifrost:settings:routing          -> JSON map {"2026-03": "figmaFileKey..."}
-bifrost:settings:filters          -> JSON {enforceFilters, allowedStatuses[], allowedTeams[]}
-bifrost:webhooks:log              -> List (capped at 200)
+heimdall:job:{id}                  -> JSON (PendingSyncJob)
+heimdall:jobs:all                  -> Sorted Set (score=timestamp)
+heimdall:jobs:state:{state}        -> Set of job IDs
+heimdall:jobs:fileKey:{key}        -> Set of job IDs
+heimdall:jobs:batch:{canonical}    -> Set of job IDs
+heimdall:jobs:idempotency:{key}    -> job ID string
+heimdall:settings:routing          -> JSON map {"2026-03": "figmaFileKey..."}
+heimdall:settings:filters          -> JSON {enforceFilters, allowedStatuses[], allowedTeams[]}
+heimdall:webhooks:log              -> List (capped at 200)
 ```
 
 ### 3. API Routes (Next.js Route Handlers)
@@ -52,7 +52,7 @@ Migrated 6 endpoints from raw HTTP server to Next.js API routes:
 **Key Changes**:
 - All domain logic (`src/`) unchanged - only HTTP layer changed
 - Plugin-facing routes have CORS enabled
-- Settings now stored in KV (no more env var `BIFROST_BATCH_FILE_MAP`)
+- Settings now stored in KV (no more env var `HEIMDALL_BATCH_FILE_MAP`)
 
 ### 4. Backend Persistence Migration
 Updated existing backend code to use KV:
@@ -87,7 +87,7 @@ Updated existing backend code to use KV:
 - Editable table: canonical key (2026-03) → Figma file key
 - Add/remove rows dynamically
 - Save to Vercel KV (no redeploy needed)
-- Replaces `BIFROST_BATCH_FILE_MAP` env var
+- Replaces `HEIMDALL_BATCH_FILE_MAP` env var
 
 #### Settings (`/settings`)
 - Toggle: Enforce eligibility filters
@@ -220,7 +220,7 @@ Created essential shadcn/ui components:
 ### For Developers
 1. **Queue functions are now async**: All calls to `enqueuePendingSyncJob`, `getJobByIdempotencyKey`, etc. must use `await`
 2. **Port still 3846**: But now serves Next.js app instead of raw HTTP server
-3. **Settings in KV**: `BIFROST_BATCH_FILE_MAP` env var is now optional (KV takes precedence)
+3. **Settings in KV**: `HEIMDALL_BATCH_FILE_MAP` env var is now optional (KV takes precedence)
 
 ### For Deployment
 1. **Requires Vercel KV**: Must link KV store in Vercel dashboard

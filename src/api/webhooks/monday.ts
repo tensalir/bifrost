@@ -3,6 +3,7 @@
  */
 
 import { getEnv } from '../../config/env.js'
+import { logger } from '../../../lib/logger.js'
 import { mondayGraphql } from '../../integrations/monday/client.js'
 import type { MondayItem } from '../../integrations/monday/client.js'
 import { mondayItemToBriefing } from '../../domain/briefing/mondayToBriefing.js'
@@ -138,8 +139,10 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
   const boardId = String((body as Record<string, string>).boardId ?? (body as Record<string, string>).board_id ?? '')
   const itemId = String((body as Record<string, string>).pulseId ?? (body as Record<string, string>).pulse_id ?? (body as Record<string, string>).item_id ?? '')
   if (!boardId || !itemId) {
+    logger.info('webhook', 'Webhook missing boardId or itemId', { boardId: boardId || '-', itemId: itemId || '-' })
     return { received: true }
   }
+  logger.info('webhook', 'Webhook received', { boardId, itemId })
 
   const env = getEnv()
   if (env.MONDAY_BOARD_ID && env.MONDAY_BOARD_ID !== boardId) {
@@ -155,6 +158,7 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
 
   const item = await getMondayItem(boardId, itemId)
   if (!item) {
+    logger.warn('webhook', 'Monday item not found', { boardId, itemId })
     return { received: true, error: 'Item not found' }
   }
 
@@ -173,10 +177,14 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     )
 
     if (!statusValue || !allowedStatuses.includes(statusValue)) {
-      return { received: true, message: `Ignored: status "${statusValue || '-'}" not eligible` }
+      const msg = `Ignored: status "${statusValue || '-'}" not eligible`
+      logger.info('webhook', msg, { mondayItemId: itemId, itemName: item.name })
+      return { received: true, message: msg }
     }
     if (allowedTeams.length > 0 && (!teamValue || !allowedTeams.includes(teamValue))) {
-      return { received: true, message: `Ignored: team "${teamValue || '-'}" not eligible` }
+      const msg = `Ignored: team "${teamValue || '-'}" not eligible`
+      logger.info('webhook', msg, { mondayItemId: itemId, itemName: item.name })
+      return { received: true, message: msg }
     }
   }
 
@@ -185,11 +193,16 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
   const docId = getDocIdFromColumnValue(briefRaw ?? null)
   let docImages: Awaited<ReturnType<typeof getDocImages>> = []
   if (docId) {
-    try { docImages = await getDocImages(docId) } catch { /* ignore */ }
+    try {
+      docImages = await getDocImages(docId)
+    } catch (err) {
+      logger.error('webhook', 'Failed to fetch doc images', err as Error, { docId, mondayItemId: itemId })
+    }
   }
 
   const briefing = mondayItemToBriefing(item, { docImages })
   if (!briefing) {
+    logger.warn('webhook', 'Batch missing or unparseable', { mondayItemId: itemId, itemName: item.name })
     return { received: true, message: 'Batch missing or unparseable' }
   }
 
@@ -200,6 +213,7 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
   let frameRenames: Array<{ oldName: string; newName: string }> | undefined
   const target = resolveFigmaTarget(briefing.batchRaw ?? briefing.batchCanonical)
   if (target?.figmaFileKey) {
+    const mappingTimer = logger.time('mapping', 'Webhook mapping agent')
     try {
       const tree = await getTemplateNodeTree(target.figmaFileKey)
       let mondayDocContent: string | null = null
@@ -209,8 +223,16 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
       })
       nodeMapping = mapping.textMappings
       frameRenames = mapping.frameRenames
-    } catch (_) {
-      // Fallback: createOrQueueFigmaPage will use briefingPayload-only (plugin fallback)
+      mappingTimer.done({
+        mondayItemId: itemId,
+        textMappingsCount: mapping.textMappings.length,
+        frameRenamesCount: mapping.frameRenames.length,
+      })
+    } catch (err) {
+      logger.error('mapping', 'Mapping agent failed; using briefing fallback', err as Error, {
+        mondayItemId: itemId,
+        figmaFileKey: target.figmaFileKey,
+      })
     }
   }
 
@@ -220,6 +242,13 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     statusTransitionId: timestamp,
     nodeMapping,
     frameRenames,
+  })
+
+  logger.info('queue', 'Webhook job outcome', {
+    mondayItemId: itemId,
+    outcome: result.outcome,
+    jobId: result.job?.id,
+    experimentPageName: result.job?.experimentPageName,
   })
 
   return {
@@ -255,7 +284,11 @@ export async function queueMondayItem(
   const qDocId = getDocIdFromColumnValue(qBriefRaw ?? null)
   let qDocImages: Awaited<ReturnType<typeof getDocImages>> = []
   if (qDocId) {
-    try { qDocImages = await getDocImages(qDocId) } catch { /* ignore */ }
+    try {
+      qDocImages = await getDocImages(qDocId)
+    } catch (err) {
+      logger.error('webhook', 'Manual queue: failed to fetch doc images', err as Error, { docId: qDocId, itemId })
+    }
   }
 
   const briefing = mondayItemToBriefing(item, { docImages: qDocImages })
@@ -278,8 +311,8 @@ export async function queueMondayItem(
       })
       nodeMapping = mapping.textMappings
       frameRenames = mapping.frameRenames
-    } catch (_) {
-      // Fallback: briefingPayload-only
+    } catch (err) {
+      logger.error('mapping', 'Manual queue: mapping agent failed', err as Error, { itemId })
     }
   }
 

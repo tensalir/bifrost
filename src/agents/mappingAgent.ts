@@ -1,6 +1,6 @@
 /**
  * Claude-powered Monday-to-Figma mapping agent.
- * Uses Bifrost Mapping Skill as system context; returns textMappings and frameRenames.
+ * Uses Heimdall Mapping Skill as system context; returns textMappings and frameRenames.
  * Falls back to column-only mapping when API key is missing or Claude fails.
  */
 
@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { z } from 'zod'
+import { logger } from '../../lib/logger.js'
 import type { MondayItem } from '../integrations/monday/client.js'
 import { columnMap, getCol } from '../integrations/monday/client.js'
 import { mondayItemToBriefing } from '../domain/briefing/mondayToBriefing.js'
@@ -37,7 +38,7 @@ const ASSET_SIZES = ['4x5', '9x16', '1x1'] as const
 
 function getSkillPath(): string {
   const root = process.cwd()
-  return join(root, 'skills', 'bifrost-mapping', 'SKILL.md')
+  return join(root, 'skills', 'heimdall-mapping', 'SKILL.md')
 }
 
 function upsertMapping(
@@ -273,10 +274,13 @@ export async function computeNodeMapping(
 ): Promise<NodeMappingResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey?.trim()) {
+    logger.info('mapping', 'No Claude API key; using column-only fallback', { mondayItemId: mondayItem.id })
     const dto = mondayItemToBriefing(mondayItem)
     if (!dto) return { textMappings: [], frameRenames: [] }
     return deterministicBackfill(briefingToNodeMapping(dto), mondayItem, options?.mondayDocContent ?? null)
   }
+
+  const mappingTimer = logger.time('mapping', 'Claude mapping agent')
 
   const skillContent = loadSkillContent()
   const userPayload = {
@@ -341,10 +345,19 @@ ${JSON.stringify(userPayload, null, 2)}`
     const parsed = JSON.parse(json) as unknown
     const result = MappingOutputSchema.safeParse(parsed)
     if (result.success) {
-      return deterministicBackfill(result.data, mondayItem, options?.mondayDocContent ?? null)
+      const out = deterministicBackfill(result.data, mondayItem, options?.mondayDocContent ?? null)
+      mappingTimer.done({
+        mondayItemId: mondayItem.id,
+        textMappingsCount: out.textMappings.length,
+        frameRenamesCount: out.frameRenames.length,
+      })
+      return out
     }
+    mappingTimer.done({ mondayItemId: mondayItem.id, fallback: 'schema_invalid' })
+    logger.warn('mapping', 'Claude response schema invalid; using fallback', { mondayItemId: mondayItem.id })
     return deterministicBackfill(fallbackMapping(mondayItem), mondayItem, options?.mondayDocContent ?? null)
-  } catch {
+  } catch (err) {
+    logger.error('mapping', 'Claude mapping agent failed', err as Error, { mondayItemId: mondayItem.id })
     return deterministicBackfill(fallbackMapping(mondayItem), mondayItem, options?.mondayDocContent ?? null)
   }
 }

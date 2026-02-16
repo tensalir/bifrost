@@ -1,4 +1,4 @@
-# Bifrost Deployment Guide
+# Heimdall Deployment Guide
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ Follow prompts to link the project.
 
 1. In Vercel dashboard, go to **Storage** tab
 2. Click **Create Database** → **KV** (Redis)
-3. Name it `bifrost-kv` (or any name)
+3. Name it `heimdall-kv` (or any name)
 4. Vercel will auto-set `KV_REST_API_URL` and `KV_REST_API_TOKEN` in your project
 
 ## Step 3: Configure Environment Variables
@@ -69,10 +69,10 @@ vercel --prod
 
 ## Step 5: Register Monday Webhook
 
-1. Get your Vercel deployment URL (e.g., `https://bifrost.vercel.app`)
+1. Get your Vercel deployment URL (e.g., `https://heimdall.vercel.app`)
 2. Go to Monday.com board → Integrations → Webhooks
 3. Create webhook:
-   - URL: `https://bifrost.vercel.app/api/webhooks/monday`
+   - URL: `https://heimdall.vercel.app/api/webhooks/monday`
    - Events: Item updated, Item created
    - Board: Select your Paid Social board
 
@@ -80,14 +80,14 @@ vercel --prod
 
 Since this is the first deployment, you need to initialize the routing map in KV:
 
-1. Go to `https://bifrost.vercel.app/routing`
+1. Go to `https://heimdall.vercel.app/routing`
 2. Add your batch → file key mappings (e.g., `2026-03` → `figmaFileKey...`)
 3. Click Save
 
 Or use the settings API:
 
 ```bash
-curl -X PUT https://bifrost.vercel.app/api/settings \
+curl -X PUT https://heimdall.vercel.app/api/settings \
   -H "Content-Type: application/json" \
   -d '{"routing": {"2026-03": "your-figma-file-key"}}'
 ```
@@ -98,7 +98,7 @@ Update the default API base URL in `figma-plugin/code.ts`:
 
 ```typescript
 const savedBase = await figma.clientStorage.getAsync('apiBase')
-const apiBase = savedBase || 'https://bifrost.vercel.app' // Update this line
+const apiBase = savedBase || 'https://heimdall.vercel.app' // Update this line
 ```
 
 Rebuild the plugin:
@@ -118,8 +118,8 @@ Publish the updated plugin to your Figma organization.
 ## Monitoring & Logs
 
 - **Vercel Logs**: https://vercel.com/your-project/logs
-- **Dashboard**: https://bifrost.vercel.app/
-- **Jobs Page**: https://bifrost.vercel.app/jobs
+- **Dashboard**: https://heimdall.vercel.app/
+- **Jobs Page**: https://heimdall.vercel.app/jobs
 
 ## Rollback
 
@@ -132,7 +132,7 @@ If deployment fails, rollback via Vercel UI:
 ## Optional: Custom Domain
 
 1. Vercel Project Settings → Domains
-2. Add your custom domain (e.g., `bifrost.yourcompany.com`)
+2. Add your custom domain (e.g., `heimdall.yourcompany.com`)
 3. Update Monday webhook URL and Figma plugin URL to use custom domain
 
 ## Troubleshooting

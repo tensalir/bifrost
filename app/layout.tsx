@@ -10,8 +10,8 @@ const spaceGrotesk = Space_Grotesk({
 })
 
 export const metadata: Metadata = {
-  title: 'Bifrost Admin',
-  description: 'Monday-to-Figma briefing sync dashboard',
+  title: 'Heimdall',
+  description: 'Figma workflow toolkit — briefing sync, comment sheets, and more',
 }
 
 export default function RootLayout({

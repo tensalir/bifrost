@@ -7,8 +7,9 @@
     "rootDir": ".",
     "strict": true,
     "skipLibCheck": true,
+    "noEmit": true,
     "types": ["@figma/plugin-typings"]
   },
-  "include": ["code.ts"],
-  "exclude": ["node_modules", "src"]
+  "include": ["code.ts", "src/**/*.ts"],
+  "exclude": ["node_modules"]
 }

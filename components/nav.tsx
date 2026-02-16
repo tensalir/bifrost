@@ -3,13 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Activity, FileText, Settings, FolderKanban, Plus } from 'lucide-react'
+import { Activity, FileText, Settings, FolderKanban, Plus, ScrollText, MessageSquare } from 'lucide-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Activity },
   { name: 'Jobs', href: '/jobs', icon: FileText },
   { name: 'Queue', href: '/queue', icon: Plus },
   { name: 'Routing', href: '/routing', icon: FolderKanban },
+  { name: 'Comments', href: '/comments', icon: MessageSquare },
+  { name: 'Logs', href: '/logs', icon: ScrollText },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
@@ -19,7 +21,7 @@ export function Nav() {
   return (
     <nav className="w-64 border-r bg-card p-4">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">Bifrost</h1>
+        <h1 className="text-2xl font-bold">Heimdall</h1>
         <p className="text-sm text-muted-foreground">Admin Panel</p>
       </div>
       <ul className="space-y-2">

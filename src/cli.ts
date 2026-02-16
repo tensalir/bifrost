@@ -1,5 +1,5 @@
 /**
- * CLI entry: start Bifrost HTTP server.
+ * CLI entry: start Heimdall HTTP server.
  */
 
 import 'dotenv/config'

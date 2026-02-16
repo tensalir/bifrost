@@ -1,4 +1,4 @@
-# Bifrost - Monday to Figma Briefing Sync
+# Heimdall - Monday to Figma Briefing Sync
 
 Automated Monday.com briefing to Figma template sync with admin dashboard.
 

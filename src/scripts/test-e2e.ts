@@ -141,7 +141,7 @@ async function main() {
   }
 
   console.log('\n=== Done ===')
-  console.log('Next: open the Figma file and run the Bifrost Sync plugin to materialize the page.')
+  console.log('Next: open the Figma file and run the Heimdall Sync plugin to materialize the page.')
 }
 
 main().catch((e) => {

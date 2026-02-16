@@ -131,6 +131,6 @@ export function startServer(port?: number): void {
   const envPort = Number(process.env.PORT)
   const p = port ?? (Number.isFinite(envPort) ? envPort : 3846)
   server.listen(p, () => {
-    console.log(`[Bifrost] Server listening on http://localhost:${p}`)
+    console.log(`[Heimdall] Server listening on http://localhost:${p}`)
   })
 }

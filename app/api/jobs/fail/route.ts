@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getJobByIdempotencyKey, updateJobState } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -17,7 +18,13 @@ export async function POST(request: Request) {
     }
     
     await updateJobState(job.id, 'failed', { errorCode })
-    
+
+    logger.warn('figma', 'Job marked failed', {
+      jobId: job.id,
+      idempotencyKey,
+      errorCode,
+    })
+
     return NextResponse.json(
       { ok: true, message: 'Job marked as failed' },
       {

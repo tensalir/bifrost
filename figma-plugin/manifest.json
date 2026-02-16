@@ -1,13 +1,18 @@
 {
-  "name": "Bifrost Sync",
-  "id": "bifrost-monday-figma-sync",
+  "name": "Heimdall",
+  "id": "heimdall-figma-plugin",
   "api": "1.0.0",
   "main": "code.js",
   "documentAccess": "dynamic-page",
   "editorType": ["figma"],
+  "menu": [
+    { "name": "Sync Briefings", "command": "sync-briefings" },
+    { "separator": true },
+    { "name": "Export Comments", "command": "export-comments" }
+  ],
   "networkAccess": {
     "allowedDomains": ["*"],
     "devAllowedDomains": ["*"],
-    "reasoning": "Plugin fetches queued jobs from Bifrost backend (default http://localhost:3846)."
+    "reasoning": "Plugin communicates with Heimdall backend and Figma REST API."
   }
 }

@@ -3,6 +3,7 @@
  * Figma REST API does not support creating/duplicating pages; V1 always queues and uses plugin.
  */
 
+import { logger } from '../../lib/logger.js'
 import { getEnv, isDryRun } from '../config/env.js'
 import type { BriefingDTO } from '../domain/briefing/schema.js'
 import { formatExperimentPageName } from '../domain/briefing/schema.js'
@@ -55,6 +56,11 @@ export async function createOrQueueFigmaPage(
 
   const existing = await getJobByIdempotencyKey(idempotencyKey)
   if (existing) {
+    logger.info('queue', 'Idempotency hit', {
+      idempotencyKey,
+      jobId: existing.id,
+      state: existing.state,
+    })
     return {
       outcome: existing.state === 'completed' ? 'skipped' : 'queued',
       idempotencyKey,
@@ -67,6 +73,11 @@ export async function createOrQueueFigmaPage(
 
   const target = resolveFigmaTarget(briefing.batchRaw ?? briefing.batchCanonical)
   if (!target) {
+    logger.warn('queue', 'Could not resolve batch to monthly file', {
+      idempotencyKey,
+      batchRaw: briefing.batchRaw,
+      batchCanonical: briefing.batchCanonical,
+    })
     return {
       outcome: 'failed',
       idempotencyKey,
@@ -118,6 +129,13 @@ export async function createOrQueueFigmaPage(
     nodeMapping: options.nodeMapping,
     frameRenames: options.frameRenames,
     images: dedupImages.length > 0 ? dedupImages : undefined,
+  })
+
+  logger.info('queue', 'Job enqueued', {
+    jobId: job.id,
+    mondayItemId: briefing.mondayItemId,
+    batchCanonical: target.batchCanonical,
+    figmaFileKey: target.figmaFileKey,
   })
 
   return {

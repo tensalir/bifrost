@@ -1,6 +1,6 @@
 import type { PendingSyncJob, PendingSyncJobState } from '@/src/jobs/types';
 /**
- * Vercel KV persistence layer for Bifrost.
+ * Vercel KV persistence layer for Heimdall.
  * Replaces the in-memory queue with Redis-backed storage.
  */
 export declare function enqueueJob(job: PendingSyncJob): Promise<void>;

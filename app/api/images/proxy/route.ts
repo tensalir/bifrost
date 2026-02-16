@@ -30,6 +30,12 @@ const ALLOWED_HOSTS = [
   '.monday.com',
   'monday-files.s3.amazonaws.com',
   'files-monday-com.s3.amazonaws.com',
+  // Figma CDN hosts (for image fills from cross-file experiment import)
+  'figma-alpha-api.s3.us-west-2.amazonaws.com',
+  's3-alpha.figma.com',
+  's3-alpha-sig.figma.com',
+  '.figma.com',
+  'figma-alpha.s3.us-west-2.amazonaws.com',
 ]
 
 function isAllowedUrl(url: string): boolean {

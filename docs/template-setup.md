@@ -1,4 +1,4 @@
-# Figma template setup for Bifrost
+# Figma template setup for Heimdall
 
 ## Template page
 
@@ -9,37 +9,37 @@
 
 For each text node that should be filled from Monday briefing data, set **plugin data** on that node:
 
-- **Key:** `bifrostId` (or `placeholderId` for legacy)
+- **Key:** `heimdallId` (or `placeholderId` for legacy)
 - **Value:** one of the IDs below.
 
 | Placeholder ID | Monday / briefing source |
 |----------------|--------------------------|
-| `bifrost:exp_name` | Experiment name (item name) |
-| `bifrost:idea` | Idea / Why |
-| `bifrost:audience_region` | Audience / region |
-| `bifrost:segment` | Segment (e.g. TOF) |
-| `bifrost:formats` | Formats (e.g. Video) |
-| `bifrost:var_a_headline` | Variation A headline |
-| `bifrost:var_a_subline` | Variation A subline |
-| `bifrost:var_a_cta` | Variation A CTA |
-| `bifrost:var_b_headline` | … same for B, C, D |
-| `bifrost:var_b_subline` | |
-| `bifrost:var_b_cta` | |
-| `bifrost:var_c_headline` | |
-| `bifrost:var_c_subline` | |
-| `bifrost:var_c_cta` | |
-| `bifrost:var_d_headline` | |
-| `bifrost:var_d_subline` | |
-| `bifrost:var_d_cta` | |
+| `heimdall:exp_name` | Experiment name (item name) |
+| `heimdall:idea` | Idea / Why |
+| `heimdall:audience_region` | Audience / region |
+| `heimdall:segment` | Segment (e.g. TOF) |
+| `heimdall:formats` | Formats (e.g. Video) |
+| `heimdall:var_a_headline` | Variation A headline |
+| `heimdall:var_a_subline` | Variation A subline |
+| `heimdall:var_a_cta` | Variation A CTA |
+| `heimdall:var_b_headline` | … same for B, C, D |
+| `heimdall:var_b_subline` | |
+| `heimdall:var_b_cta` | |
+| `heimdall:var_c_headline` | |
+| `heimdall:var_c_subline` | |
+| `heimdall:var_c_cta` | |
+| `heimdall:var_d_headline` | |
+| `heimdall:var_d_subline` | |
+| `heimdall:var_d_cta` | |
 
 ## Section divider pages (page ordering)
 
-Monthly design files use **empty pages as section headers** to group experiments by product/use case (e.g. "BUNDLES", "SWITCH", "ENGAGED KITS"). When Bifrost creates a new experiment page, it inserts it under the correct section divider.
+Monthly design files use **empty pages as section headers** to group experiments by product/use case (e.g. "BUNDLES", "SWITCH", "ENGAGED KITS"). When Heimdall creates a new experiment page, it inserts it under the correct section divider.
 
 ### How it works
 
 1. The briefing's `sectionName` is extracted from Monday (columns: `use_case`, `product`, `product_category`, `section`, `category`).
-2. If no explicit column is found, Bifrost parses the experiment name for known keywords (e.g. "Bundles" in `EXP-SB150.Q&ABundles-Bundles-Mix`).
+2. If no explicit column is found, Heimdall parses the experiment name for known keywords (e.g. "Bundles" in `EXP-SB150.Q&ABundles-Bundles-Mix`).
 3. The plugin scans `figma.root.children` for section divider pages (non-EXP, non-template pages) and inserts the new page just before the next section divider.
 4. If no matching section is found, the page is appended at the end.
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getJobByIdempotencyKey, updateJobState } from '@/lib/kv'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -18,7 +19,13 @@ export async function POST(request: Request) {
     }
     
     await updateJobState(job.id, 'completed', { figmaPageId, figmaFileUrl })
-    
+
+    logger.info('figma', 'Job marked completed', {
+      jobId: job.id,
+      idempotencyKey,
+      figmaPageId,
+    })
+
     return NextResponse.json(
       { ok: true, message: 'Job marked as completed' },
       {
