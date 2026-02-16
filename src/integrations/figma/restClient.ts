@@ -44,6 +44,41 @@ export function hasFigmaReadAccess(): boolean {
   return !!getFigmaToken()
 }
 
+// ── Teams & Projects ──────────────────────────────────────────────
+
+/** Project item from GET /v1/teams/:team_id/projects */
+export interface FigmaProject {
+  id: string
+  name: string
+}
+
+/**
+ * List all projects in a Figma team.
+ * Uses GET /v1/teams/:team_id/projects.
+ * Requires the token to have team-level access.
+ */
+export async function getTeamProjects(
+  teamId: string
+): Promise<FigmaProject[]> {
+  const token = getFigmaToken()
+  if (!token) return []
+  const url = `${FIGMA_API_BASE}/teams/${teamId}/projects`
+  const res = await fetch(url, { headers: { 'X-Figma-Token': token } })
+  if (!res.ok) {
+    if (res.status === 403 || res.status === 404) return []
+    throw new Error(`Figma API error: ${res.status} ${res.statusText}`)
+  }
+  const data = (await res.json()) as {
+    name?: string
+    projects?: Array<{ id: number | string; name: string }>
+  }
+  if (!Array.isArray(data.projects)) return []
+  return data.projects.map((p) => ({
+    id: String(p.id),
+    name: p.name,
+  }))
+}
+
 /** Project file list item from GET /v1/projects/:id/files */
 export interface FigmaProjectFile {
   key: string
