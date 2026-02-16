@@ -35,7 +35,7 @@ export function FeedbackCell({ role, value, experimentId, onSave, className }: F
 
   if (editing) {
     return (
-      <td className={cn('align-top px-2 py-1 border-b border-border/50', className)}>
+      <td className={cn(!className && 'align-top px-2 py-1 border-b border-border/50', className)}>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -52,7 +52,8 @@ export function FeedbackCell({ role, value, experimentId, onSave, className }: F
   return (
     <td
       className={cn(
-        'align-top px-2 py-2 border-b border-border/50 cursor-pointer hover:bg-muted/30 min-w-[140px]',
+        !className && 'align-top px-2 py-2 border-b border-border/50',
+        'cursor-pointer hover:bg-muted/30 min-w-[140px]',
         className
       )}
       onClick={() => setEditing(true)}

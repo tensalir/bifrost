@@ -35,17 +35,21 @@ export function ExperimentRow({ experiment, onEntrySaved, onSummaryGenerated }: 
     [onEntrySaved]
   )
 
+  const cellClass = 'align-top px-3 py-2 border-r border-border/20 text-xs'
+  const cellClassLast = 'align-top px-3 py-2'
+
   return (
     <>
-      <tr className="border-b border-border/30">
-        <td className="align-top px-2 py-2 border-b border-border/50 text-xs font-medium text-foreground">
+      <tr className="border-b border-border/20 hover:bg-muted/10 transition-colors">
+        <td className={cellClass + ' font-medium text-foreground'}>
           {experiment.experiment_name}
         </td>
         <BriefLinkCell
           value={experiment.brief_link}
           accessible={experiment.figma_accessible}
+          className={cellClass}
         />
-        <td className="align-top px-2 py-2 border-b border-border/50 text-center">
+        <td className={cellClass + ' text-center'}>
           {experiment.is_urgent ? (
             <span className="text-[10px] font-medium text-amber-600">Urgent</span>
           ) : (
@@ -57,25 +61,29 @@ export function ExperimentRow({ experiment, onEntrySaved, onSummaryGenerated }: 
           value={getEntry(experiment, 'strategy')}
           experimentId={experiment.id}
           onSave={saveEntry}
+          className={cellClass}
         />
         <FeedbackCell
           role="design"
           value={getEntry(experiment, 'design')}
           experimentId={experiment.id}
           onSave={saveEntry}
+          className={cellClass}
         />
         <FeedbackCell
           role="copy"
           value={getEntry(experiment, 'copy')}
           experimentId={experiment.id}
           onSave={saveEntry}
+          className={cellClass}
         />
         <SummaryCell
           experimentId={experiment.id}
           cachedSummary={experiment.summary_cache}
           onGenerated={onSummaryGenerated}
+          className={cellClass}
         />
-        <td className="align-top px-2 py-2 border-b border-border/50">
+        <td className={cellClassLast}>
           {experiment.sent_to_monday ? (
             <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
               <Check className="h-3.5 w-3.5 text-emerald-500" />

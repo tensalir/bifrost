@@ -12,7 +12,9 @@ import {
   FileText,
   Pin,
   PinOff,
+  ClipboardList,
 } from 'lucide-react'
+import Link from 'next/link'
 
 /* -------------------------------------------------------------------------- */
 /*  Types                                                                     */
@@ -360,6 +362,25 @@ function SheetsContent() {
           <p className="text-sm text-muted-foreground mt-1">
             Select a project to view and consolidate Figma comments.
           </p>
+        </div>
+
+        {/* Stakeholder Feedback entry — before pinned projects */}
+        <div className="mb-10">
+          <Link
+            href="/sheets/stakeholder"
+            className="group flex items-center gap-4 rounded-xl border border-border bg-card p-4 overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 text-left w-full max-w-md"
+          >
+            <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-primary/10 text-primary shrink-0">
+              <ClipboardList className="h-6 w-6" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-foreground">Stakeholder Feedback</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Consolidate strategy, design, and copy feedback. Import from Excel, send to Monday.
+              </p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-primary shrink-0" />
+          </Link>
         </div>
 
         {/* Pinned projects */}

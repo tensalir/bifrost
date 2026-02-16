@@ -30,7 +30,7 @@ export function SummaryCell({ experimentId, cachedSummary, onGenerated, classNam
   }
 
   return (
-    <td className={cn('align-top px-2 py-2 border-b border-border/50 min-w-[160px]', className)}>
+    <td className={cn(!className && 'align-top px-2 py-2 border-b border-border/50 min-w-[160px]', className)}>
       {cachedSummary ? (
         <div className="space-y-1">
           <p className="text-xs text-foreground whitespace-pre-wrap line-clamp-4">{cachedSummary}</p>

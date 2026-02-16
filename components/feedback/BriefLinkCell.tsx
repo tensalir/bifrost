@@ -68,7 +68,7 @@ export function BriefLinkCell({ value, accessible, onSave, className }: BriefLin
 
   if (editing) {
     return (
-      <td className={cn('align-top px-2 py-1 border-b border-border/50', className)}>
+      <td className={cn(!className && 'align-top px-2 py-1 border-b border-border/50', className)}>
         <input
           type="text"
           value={input}
@@ -85,7 +85,7 @@ export function BriefLinkCell({ value, accessible, onSave, className }: BriefLin
   }
 
   return (
-    <td className={cn('align-top px-2 py-2 border-b border-border/50', className)}>
+    <td className={cn(!className && 'align-top px-2 py-2 border-b border-border/50', className)}>
       <div className="flex items-center gap-1.5 flex-wrap">
         {checking ? (
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
@@ -111,6 +111,9 @@ export function BriefLinkCell({ value, accessible, onSave, className }: BriefLin
               {isFigma ? 'Figma link' : 'Link'}
             </a>
             <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+            {isFigma && accessible === false && (
+              <span className="text-[10px] text-muted-foreground/70 italic">preview unavailable</span>
+            )}
           </>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
@@ -123,7 +126,7 @@ export function BriefLinkCell({ value, accessible, onSave, className }: BriefLin
         >
           <Link2 className="h-3.5 w-3.5" />
         </button>
-        {isFigma && parsed?.fileKey && !thumbUrl && !checking && (
+        {isFigma && parsed?.fileKey && !thumbUrl && !checking && accessible !== false && (
           <button
             type="button"
             onClick={tryLoadThumb}

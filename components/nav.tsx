@@ -32,7 +32,7 @@ const sections: NavSection[] = [
     items: [
       { name: 'Heimdall Plugin', href: '/admin/plugin', icon: Puzzle },
       { name: 'Figma Comments', href: '/sheets', icon: MessageSquare, external: true },
-      { name: 'Stakeholder Feedback', href: '/feedback', icon: ClipboardList },
+      { name: 'Stakeholder Feedback', href: '/sheets/stakeholder', icon: ClipboardList, external: true },
     ],
   },
   {
