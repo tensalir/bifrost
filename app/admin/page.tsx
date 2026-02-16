@@ -225,11 +225,11 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Connections</h1>
           <p className="text-muted-foreground">Platform integrations and board-to-file routing</p>
         </div>
         <Button variant="outline" size="icon" onClick={refresh} disabled={loading}>
