@@ -207,9 +207,16 @@ function SheetsContent() {
     fetchTeams()
   }, [fetchTeams])
 
+  const PERFORMANCE_ADS_PROJECT_ID = '387033831'
   const allProjects = teams.flatMap((t) => t.projects)
   const pinnedProjects = allProjects.filter((p) => pinnedIds.has(p.id))
-  const unpinnedProjects = allProjects.filter((p) => !pinnedIds.has(p.id))
+  const unpinnedProjects = allProjects
+    .filter((p) => !pinnedIds.has(p.id))
+    .sort((a, b) => {
+      if (a.id === PERFORMANCE_ADS_PROJECT_ID) return -1
+      if (b.id === PERFORMANCE_ADS_PROJECT_ID) return 1
+      return 0
+    })
 
   const selectedProject = selectedProjectId
     ? allProjects.find((p) => p.id === selectedProjectId)
@@ -278,7 +285,7 @@ function SheetsContent() {
           <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 rounded-2xl bg-card border border-border">
             <MessageSquare className="h-6 w-6 text-primary" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground mb-2">Feedback Summarizer</h1>
+          <h1 className="text-xl font-semibold text-foreground mb-2">Figma Comments</h1>
           <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
             {error}. You can still paste a Figma URL directly.
           </p>
@@ -348,7 +355,7 @@ function SheetsContent() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            Feedback Summarizer
+            Figma Comments
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Select a project to view and consolidate Figma comments.
