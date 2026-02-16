@@ -10,6 +10,8 @@ import {
   Loader2,
   FolderOpen,
   FileText,
+  Pin,
+  PinOff,
 } from 'lucide-react'
 
 /* -------------------------------------------------------------------------- */
@@ -91,54 +93,69 @@ function FileCard({
 function ProjectCard({
   project,
   onClick,
+  isPinned,
+  onTogglePin,
 }: {
   project: FigmaProjectWithFiles
   onClick: () => void
+  isPinned: boolean
+  onTogglePin: (e: React.MouseEvent) => void
 }) {
   const previewFiles = project.files.slice(0, 4)
   const fileCount = project.files.length
 
   return (
-    <button
-      onClick={onClick}
-      className="group text-left rounded-xl border border-border bg-card overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200"
-    >
-      <div className="aspect-[3/2] bg-muted/20 relative overflow-hidden">
-        {previewFiles.length > 0 ? (
-          <div className="grid grid-cols-2 gap-px h-full bg-border/30">
-            {previewFiles.map((f) => (
-              <div key={f.key} className="bg-muted/30 overflow-hidden">
-                {f.thumbnail_url ? (
-                  <img
-                    src={f.thumbnail_url}
-                    alt={f.name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <FileText className="h-6 w-6 text-muted-foreground/20" />
-                  </div>
-                )}
-              </div>
-            ))}
-            {previewFiles.length < 4 &&
-              Array.from({ length: 4 - previewFiles.length }).map((_, i) => (
-                <div key={`empty-${i}`} className="bg-muted/10" />
+    <div className="group relative rounded-xl border border-border bg-card overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200">
+      <button onClick={onClick} className="w-full text-left">
+        <div className="aspect-[3/2] bg-muted/20 relative overflow-hidden">
+          {previewFiles.length > 0 ? (
+            <div className="grid grid-cols-2 gap-px h-full bg-border/30">
+              {previewFiles.map((f) => (
+                <div key={f.key} className="bg-muted/30 overflow-hidden">
+                  {f.thumbnail_url ? (
+                    <img
+                      src={f.thumbnail_url}
+                      alt={f.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <FileText className="h-6 w-6 text-muted-foreground/20" />
+                    </div>
+                  )}
+                </div>
               ))}
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <FolderOpen className="h-10 w-10 text-muted-foreground/20" />
-          </div>
-        )}
-      </div>
-      <div className="p-3 flex items-center justify-between">
-        <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
-        <span className="shrink-0 ml-2 text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
-          {fileCount} {fileCount === 1 ? 'file' : 'files'}
-        </span>
-      </div>
-    </button>
+              {previewFiles.length < 4 &&
+                Array.from({ length: 4 - previewFiles.length }).map((_, i) => (
+                  <div key={`empty-${i}`} className="bg-muted/10" />
+                ))}
+            </div>
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <FolderOpen className="h-10 w-10 text-muted-foreground/20" />
+            </div>
+          )}
+        </div>
+        <div className="p-3 flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground truncate">{project.name}</p>
+          <span className="shrink-0 ml-2 text-[10px] rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+            {fileCount} {fileCount === 1 ? 'file' : 'files'}
+          </span>
+        </div>
+      </button>
+      {/* Pin toggle */}
+      <button
+        onClick={onTogglePin}
+        className={`absolute top-2 right-2 p-1.5 rounded-lg transition-all ${
+          isPinned
+            ? 'bg-primary/20 text-primary opacity-100'
+            : 'bg-background/60 backdrop-blur-sm text-muted-foreground opacity-0 group-hover:opacity-100'
+        } hover:bg-primary/30 hover:text-primary`}
+        title={isPinned ? 'Unpin project' : 'Pin project'}
+      >
+        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+      </button>
+    </div>
   )
 }
 
@@ -152,6 +169,7 @@ function SheetsContent() {
   const selectedProjectId = searchParams.get('project')
 
   const [teams, setTeams] = useState<TeamData[]>([])
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -163,13 +181,21 @@ function SheetsContent() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/figma/teams')
-      const data = await res.json()
-      if (!res.ok) {
+      const [teamsRes, pinsRes] = await Promise.all([
+        fetch('/api/figma/teams'),
+        fetch('/api/pinned-projects'),
+      ])
+      if (teamsRes.ok) {
+        const data = await teamsRes.json()
+        setTeams(data.teams ?? [])
+      } else {
+        const data = await teamsRes.json()
         setError(data.error || 'Failed to load projects')
-        return
       }
-      setTeams(data.teams ?? [])
+      if (pinsRes.ok) {
+        const data = await pinsRes.json()
+        setPinnedIds(new Set(data.pinnedProjectIds ?? []))
+      }
     } catch {
       setError('Failed to connect to Figma')
     } finally {
@@ -182,10 +208,41 @@ function SheetsContent() {
   }, [fetchTeams])
 
   const allProjects = teams.flatMap((t) => t.projects)
+  const pinnedProjects = allProjects.filter((p) => pinnedIds.has(p.id))
+  const unpinnedProjects = allProjects.filter((p) => !pinnedIds.has(p.id))
 
   const selectedProject = selectedProjectId
     ? allProjects.find((p) => p.id === selectedProjectId)
     : null
+
+  const togglePin = async (projectId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const isPinned = pinnedIds.has(projectId)
+
+    // Optimistic update
+    setPinnedIds((prev) => {
+      const next = new Set(prev)
+      if (isPinned) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+
+    try {
+      await fetch('/api/pinned-projects', {
+        method: isPinned ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      })
+    } catch {
+      // Revert on failure
+      setPinnedIds((prev) => {
+        const next = new Set(prev)
+        if (isPinned) next.add(projectId)
+        else next.delete(projectId)
+        return next
+      })
+    }
+  }
 
   const handleUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -298,15 +355,46 @@ function SheetsContent() {
           </p>
         </div>
 
-        {allProjects.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 mb-12">
-            {allProjects.map((project) => (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                onClick={() => router.push(`/sheets?project=${project.id}`)}
-              />
-            ))}
+        {/* Pinned projects */}
+        {pinnedProjects.length > 0 && (
+          <div className="mb-10">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">
+              <Pin className="h-3 w-3" />
+              Pinned
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {pinnedProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  isPinned={true}
+                  onTogglePin={(e) => togglePin(project.id, e)}
+                  onClick={() => router.push(`/sheets?project=${project.id}`)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* All projects */}
+        {unpinnedProjects.length > 0 && (
+          <div className="mb-12">
+            {pinnedProjects.length > 0 && (
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">
+                All projects
+              </p>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+              {unpinnedProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  isPinned={false}
+                  onTogglePin={(e) => togglePin(project.id, e)}
+                  onClick={() => router.push(`/sheets?project=${project.id}`)}
+                />
+              ))}
+            </div>
           </div>
         )}
 

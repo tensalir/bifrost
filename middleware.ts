@@ -2,9 +2,10 @@
  * Heimdall middleware — route-based auth + CORS + legacy redirects.
  *
  * Auth zones:
- *   /admin/*   → Basic Auth with ADMIN_PASSWORD
- *   /sheets/*  → Cookie-based auth with SHEETS_PASSWORD (except /sheets/login)
+ *   /admin/*   → Supabase session (magic link / email+password)
+ *   /sheets/*  → Cookie-based auth with SHEETS_PASSWORD
  *   /api/*     → CORS headers only (Figma plugin needs open access)
+ *   /auth/*    → No auth (callback handler)
  *   /          → No auth (landing redirect)
  *
  * Legacy redirects keep old URLs working during migration.
@@ -12,6 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -30,7 +32,6 @@ const LEGACY_REDIRECTS: Record<string, string> = {
   '/logs': '/admin/logs',
   '/settings': '/admin/settings',
   '/comments': '/sheets',
-  // Internal admin path migrations
   '/admin/jobs': '/admin/plugin/jobs',
   '/admin/queue': '/admin/plugin/queue',
   '/admin/routing': '/admin',
@@ -39,14 +40,12 @@ const LEGACY_REDIRECTS: Record<string, string> = {
 function legacyRedirect(request: NextRequest): NextResponse | null {
   const { pathname } = request.nextUrl
 
-  // Exact match redirects
   if (LEGACY_REDIRECTS[pathname]) {
     const url = request.nextUrl.clone()
     url.pathname = LEGACY_REDIRECTS[pathname]
     return NextResponse.redirect(url, 308)
   }
 
-  // /comments/:fileKey → /sheets/:fileKey
   if (pathname.startsWith('/comments/')) {
     const url = request.nextUrl.clone()
     url.pathname = pathname.replace('/comments/', '/sheets/')
@@ -73,34 +72,54 @@ function handleApi(request: NextRequest): NextResponse {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Admin Basic Auth                                                  */
+/*  Admin Auth — Supabase session                                     */
 /* ------------------------------------------------------------------ */
 
-function handleAdminAuth(request: NextRequest): NextResponse | null {
-  const adminPassword = process.env.ADMIN_PASSWORD
-  if (!adminPassword) return null
+async function handleAdminAuth(request: NextRequest): Promise<NextResponse> {
+  const { pathname } = request.nextUrl
 
-  const authHeader = request.headers.get('authorization')
-
-  if (!authHeader || !authHeader.startsWith('Basic ')) {
-    return new NextResponse('Authentication required', {
-      status: 401,
-      headers: { 'WWW-Authenticate': 'Basic realm="Heimdall Admin"' },
-    })
+  // Allow login page without auth
+  if (pathname === '/admin/login') {
+    return NextResponse.next()
   }
 
-  const base64Credentials = authHeader.split(' ')[1]
-  const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii')
-  const [, password] = credentials.split(':')
-
-  if (password !== adminPassword) {
-    return new NextResponse('Invalid credentials', {
-      status: 401,
-      headers: { 'WWW-Authenticate': 'Basic realm="Heimdall Admin"' },
-    })
+  // If Supabase is not configured, fall back to no auth (dev mode)
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.next()
   }
 
-  return null
+  // Create Supabase client for middleware
+  let response = NextResponse.next({ request: { headers: request.headers } })
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll()
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => {
+          request.cookies.set(name, value)
+        })
+        response = NextResponse.next({ request: { headers: request.headers } })
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options)
+        })
+      },
+    },
+  })
+
+  // Refresh session and check for user
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/admin/login'
+    return NextResponse.redirect(url)
+  }
+
+  return response
 }
 
 /* ------------------------------------------------------------------ */
@@ -115,12 +134,10 @@ function handleSheetsAuth(request: NextRequest): NextResponse | null {
 
   const { pathname } = request.nextUrl
 
-  // Allow unauthenticated access to login page
   if (pathname === '/sheets/login') return null
 
   const token = request.cookies.get(SHEETS_COOKIE_NAME)?.value
 
-  // Token is a base64-encoded SHEETS_PASSWORD — simple but effective for Phase 1
   if (token) {
     try {
       const decoded = Buffer.from(token, 'base64').toString('ascii')
@@ -140,33 +157,36 @@ function handleSheetsAuth(request: NextRequest): NextResponse | null {
 /*  Main middleware                                                    */
 /* ------------------------------------------------------------------ */
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // 1. Legacy redirects
   const redirect = legacyRedirect(request)
   if (redirect) return redirect
 
-  // 2. API routes: CORS only
+  // 2. Auth callback — no auth needed
+  if (pathname.startsWith('/auth/')) {
+    return NextResponse.next()
+  }
+
+  // 3. API routes: CORS only
   if (pathname.startsWith('/api/')) {
     return handleApi(request)
   }
 
-  // 3. Admin routes: Basic Auth
+  // 4. Admin routes: Supabase session
   if (pathname.startsWith('/admin')) {
-    const denied = handleAdminAuth(request)
-    if (denied) return denied
-    return NextResponse.next()
+    return handleAdminAuth(request)
   }
 
-  // 4. Sheets routes: cookie-based auth
+  // 5. Sheets routes: cookie-based auth
   if (pathname.startsWith('/sheets')) {
     const denied = handleSheetsAuth(request)
     if (denied) return denied
     return NextResponse.next()
   }
 
-  // 5. Everything else (root landing, etc.)
+  // 6. Everything else (root landing, etc.)
   return NextResponse.next()
 }
 
@@ -175,8 +195,8 @@ export const config = {
     '/',
     '/admin/:path*',
     '/sheets/:path*',
+    '/auth/:path*',
     '/api/:path*',
-    // Legacy paths for redirects
     '/jobs/:path*',
     '/queue/:path*',
     '/routing/:path*',
