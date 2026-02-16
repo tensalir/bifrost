@@ -1,0 +1,75 @@
+/**
+ * Thoughtform Design System — Shared Tokens
+ *
+ * These are the cross-repo base tokens. Individual repos override brand accents
+ * (e.g., Heimdall uses mint green, Babylon uses emerald) in their own CSS.
+ *
+ * All color tokens use HSL channel values (H S% L%) without the hsl() wrapper,
+ * allowing flexible alpha manipulation: hsl(var(--primary) / 0.5)
+ */
+
+:root {
+  /* Surface Colors */
+  --background: 35 20% 97%;
+  --foreground: 0 0% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 10%;
+
+  /* Semantic Colors */
+  --secondary: 35 25% 92%;
+  --secondary-foreground: 0 0% 10%;
+  --muted: 35 15% 90%;
+  --muted-foreground: 0 0% 45%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* Border & Input */
+  --border: 35 10% 88%;
+  --input: 35 10% 88%;
+
+  /* Radius */
+  --radius: 0.75rem;
+
+  /* Spacing (reference) */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Motion */
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-slow: 400ms;
+
+  /* Z-index */
+  --z-dropdown: 50;
+  --z-sticky: 100;
+  --z-modal: 200;
+  --z-popover: 300;
+  --z-tooltip: 400;
+  --z-toast: 500;
+}
+
+.dark {
+  --background: 0 0% 8%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 12%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 12%;
+  --popover-foreground: 0 0% 98%;
+  --secondary: 0 0% 16%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 18%;
+  --muted-foreground: 0 0% 60%;
+  --destructive: 0 72% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 20%;
+  --input: 0 0% 20%;
+}

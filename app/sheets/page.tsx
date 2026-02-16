@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MessageSquare, ArrowRight } from 'lucide-react'
 
-export default function CommentsIndexPage() {
+export default function SheetsIndexPage() {
   const router = useRouter()
   const [url, setUrl] = useState('')
   const [error, setError] = useState('')
@@ -13,11 +13,9 @@ export default function CommentsIndexPage() {
     e.preventDefault()
     setError('')
 
-    // Extract file key from various Figma URL formats
     const input = url.trim()
     let fileKey = input
 
-    // Match: figma.com/design/:fileKey/... or figma.com/file/:fileKey/...
     const figmaMatch = input.match(/figma\.com\/(?:design|file)\/([a-zA-Z0-9]+)/)
     if (figmaMatch) {
       fileKey = figmaMatch[1]
@@ -28,7 +26,7 @@ export default function CommentsIndexPage() {
       return
     }
 
-    router.push(`/comments/${fileKey}`)
+    router.push(`/sheets/${fileKey}`)
   }
 
   return (

@@ -41,7 +41,7 @@ export default function CommentSheetPage() {
       <div className="h-full flex items-center justify-center bg-background">
         <div className="text-center">
           <div className="flex items-center justify-center w-14 h-14 mx-auto mb-5 rounded-2xl bg-card border border-border">
-            <span className="text-2xl font-bold tracking-tight select-none text-foreground">B</span>
+            <span className="text-2xl font-bold tracking-tight select-none text-foreground">H</span>
           </div>
           <Loader2 className="h-5 w-5 animate-spin mx-auto text-primary mb-3" />
           <p className="text-sm text-muted-foreground">

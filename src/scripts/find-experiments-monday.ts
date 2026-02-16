@@ -60,7 +60,7 @@ async function mondayQuery<T>(query: string, variables?: Record<string, unknown>
   return json.data ?? null
 }
 
-async function getAllBoardItems(boardId: string): Promise<MondayItem[]> {
+async function getAllBoardItems(boardId: string): Promise<{ items: MondayItem[]; columns: Array<{ id: string; title: string; type?: string }> }> {
   const allItems: MondayItem[] = []
   let cursor: string | null = null
 

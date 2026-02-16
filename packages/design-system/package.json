@@ -1,0 +1,17 @@
+{
+  "name": "@thoughtform/design-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared design tokens, primitives, and patterns for Thoughtform repos (Heimdall, Babylon, etc.)",
+  "exports": {
+    "./tokens.css": "./tokens/css/tokens.css",
+    "./theme": "./tokens/ts/theme.ts",
+    "./components": "./components/index.ts",
+    "./patterns": "./patterns/index.ts"
+  },
+  "files": [
+    "tokens",
+    "components",
+    "patterns"
+  ]
+}
