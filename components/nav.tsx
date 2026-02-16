@@ -64,7 +64,7 @@ export function Nav() {
   }
 
   return (
-    <nav className="w-64 border-r bg-card p-4 flex flex-col">
+    <nav className="w-72 border-r bg-card p-5 flex flex-col">
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Heimdall</h1>
         <p className="text-sm text-muted-foreground">Admin Panel</p>
