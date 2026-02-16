@@ -6,8 +6,9 @@ export const dynamic = 'force-dynamic'
 /**
  * POST /api/comments/summarize
  *
- * Accepts an array of comment messages and a layer name,
- * returns a concise AI-generated summary of the feedback.
+ * Accepts an array of comment messages (with optional authors) and a layer name,
+ * returns a concise AI-generated summary using extended thinking for
+ * better reasoning about comment sequences and actionable decisions.
  *
  * Body: { comments: string[], nodeName: string }
  * Returns: { summary: string }
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
 
   const layerLabel = nodeName || 'this layer'
   const commentBlock = comments
-    .slice(0, 40) // cap at 40 comments to stay within token limits
+    .slice(0, 40)
     .map((c, i) => `${i + 1}. ${c}`)
     .join('\n')
 
@@ -46,20 +47,31 @@ export async function POST(req: NextRequest) {
     const client = new Anthropic({ apiKey })
     const response = await client.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 200,
+      max_tokens: 8000,
+      thinking: {
+        type: 'enabled',
+        budget_tokens: 4000,
+      },
       messages: [
         {
           role: 'user',
-          content: `You are summarizing design feedback comments on a Figma layer called "${layerLabel}". Write a concise 1-2 sentence summary of the key feedback themes and any action items. Be direct and specific. Do not use bullet points.
+          content: `Summarize the design feedback on Figma layer "${layerLabel}" for the designer who needs to act on it.
 
-Comments:
+Rules:
+- Max 1-2 short sentences. Be blunt and specific.
+- Focus on WHAT needs to change, not what was discussed. State decisions and open action items.
+- Name concrete design elements: copy text, colors, layout, imagery — not meta-commentary about the conversation.
+- If a decision was reached, state it as fact. If something is unresolved, flag it.
+- Do not use bullet points, markdown, or filler words.
+
+Comments (chronological):
 ${commentBlock}`,
         },
       ],
     })
 
-    const text =
-      response.content[0]?.type === 'text' ? response.content[0].text : ''
+    const textBlock = response.content.find((b) => b.type === 'text')
+    const text = textBlock?.type === 'text' ? textBlock.text : ''
     return NextResponse.json({ summary: text.trim() })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown error'

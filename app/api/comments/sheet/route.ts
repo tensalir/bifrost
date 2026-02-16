@@ -119,6 +119,27 @@ function sortCommentThreads(comments: EnrichedComment[]): EnrichedComment[] {
   return result
 }
 
+/**
+ * Walk the full document tree and build a map of every nodeId to its parent
+ * page (CANVAS) id. This lets us attribute comments on deeply nested layers
+ * back to the correct page tab.
+ */
+function buildNodeToPageMap(doc: FigmaTreeNode): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const page of doc.children ?? []) {
+    if (page.type !== 'CANVAS') continue
+    map.set(page.id, page.id)
+    const walk = (node: FigmaTreeNode) => {
+      map.set(node.id, page.id)
+      for (const child of node.children ?? []) {
+        walk(child)
+      }
+    }
+    walk(page)
+  }
+  return map
+}
+
 // ── Route Handler ────────────────────────────────────────────────
 
 /**
@@ -138,10 +159,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Only 2 Figma API calls — fast even for huge files
+    // 2 Figma API calls: comments + full file tree (needed to resolve node → page)
     const [rawComments, fileMeta] = await Promise.all([
       getFileComments(fileKey, { asMarkdown: true }),
-      getFile(fileKey, { depth: 1 }),
+      getFile(fileKey),
     ])
 
     if (!fileMeta || !fileMeta.document) {
@@ -151,7 +172,7 @@ export async function GET(req: NextRequest) {
     const fileName = fileMeta.name
     const doc = fileMeta.document as unknown as FigmaTreeNode
 
-    // Build page map from document tree (depth 1 = pages only)
+    // Build page map from document tree
     const pageMap = new Map<string, string>()
     const pageOrder: string[] = []
     for (const page of (doc.children ?? []) as FigmaTreeNode[]) {
@@ -159,6 +180,10 @@ export async function GET(req: NextRequest) {
       pageMap.set(page.id, page.name)
       pageOrder.push(page.id)
     }
+
+    // Build nodeId → pageId lookup from full tree so we can attribute
+    // comments on any nested layer back to its parent page.
+    const nodeToPage = buildNodeToPageMap(doc)
 
     // Build comment lookup maps
     const byId = new Map<string, FigmaComment>()
@@ -216,11 +241,12 @@ export async function GET(req: NextRequest) {
         comments: sorted,
       }
 
-      if (pageMap.has(layerKey)) {
-        // This node IS a page — put comments on that page
-        commentsByPage.get(layerKey)!.push(layer)
+      // Resolve which page this layer belongs to via the full tree lookup
+      const resolvedPageId = layerKey !== '__canvas__' ? nodeToPage.get(layerKey) : undefined
+
+      if (resolvedPageId && commentsByPage.has(resolvedPageId)) {
+        commentsByPage.get(resolvedPageId)!.push(layer)
       } else {
-        // Unknown page — put in "Other"
         commentsByPage.get('__other__')!.push(layer)
       }
     }
