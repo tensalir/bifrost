@@ -78,10 +78,8 @@ function handleApi(request: NextRequest): NextResponse {
 async function handleAdminAuth(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl
 
-  // Allow login page without auth
-  if (pathname === '/admin/login') {
-    return NextResponse.next()
-  }
+  // Login page is at /login (outside admin layout), not /admin/login
+  // No special handling needed here
 
   // If Supabase is not configured, fall back to no auth (dev mode)
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -115,7 +113,7 @@ async function handleAdminAuth(request: NextRequest): Promise<NextResponse> {
 
   if (!user) {
     const url = request.nextUrl.clone()
-    url.pathname = '/admin/login'
+    url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
@@ -164,8 +162,8 @@ export async function middleware(request: NextRequest) {
   const redirect = legacyRedirect(request)
   if (redirect) return redirect
 
-  // 2. Auth callback — no auth needed
-  if (pathname.startsWith('/auth/')) {
+  // 2. Auth callback + login page — no auth needed
+  if (pathname.startsWith('/auth/') || pathname === '/login') {
     return NextResponse.next()
   }
 
@@ -193,6 +191,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/',
+    '/login',
     '/admin/:path*',
     '/sheets/:path*',
     '/auth/:path*',
