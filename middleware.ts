@@ -24,12 +24,16 @@ const CORS_HEADERS = {
 /* ------------------------------------------------------------------ */
 
 const LEGACY_REDIRECTS: Record<string, string> = {
-  '/jobs': '/admin/jobs',
-  '/queue': '/admin/queue',
-  '/routing': '/admin/routing',
+  '/jobs': '/admin/plugin/jobs',
+  '/queue': '/admin/plugin/queue',
+  '/routing': '/admin',
   '/logs': '/admin/logs',
   '/settings': '/admin/settings',
   '/comments': '/sheets',
+  // Internal admin path migrations
+  '/admin/jobs': '/admin/plugin/jobs',
+  '/admin/queue': '/admin/plugin/queue',
+  '/admin/routing': '/admin',
 }
 
 function legacyRedirect(request: NextRequest): NextResponse | null {
