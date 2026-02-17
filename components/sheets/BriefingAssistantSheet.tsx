@@ -381,70 +381,85 @@ export function BriefingAssistantSheet({
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
 
-      {/* ── Row 1: Title bar (thin) ── */}
-      <div className="flex-shrink-0 h-8 border-b border-border/40 bg-card/60 flex items-center px-3 gap-2">
-        <Link
-          href={sprintId ? '/briefing-assistant' : '/sheets'}
-          className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
-          aria-label={sprintId ? 'Back to Briefing Assistant' : 'Back to sheets'}
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-        </Link>
-        <span className="text-[12px] font-medium text-foreground/80 truncate max-w-[200px]" title={sprintData?.name ?? 'Sprint'}>
-          {sprintData?.name ?? 'Sprint'}
-        </span>
-        {sprintData?.batches?.length ? (
-          <div className="flex items-center gap-2 ml-1">
-            {sprintData.batches.map((b) => (
-              <span key={b.batch_key} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/60">
-                {b.batch_label}
-                {b.monday_board_id ? (
-                  <a href={`https://loopearplugs.monday.com/boards/${b.monday_board_id}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><LayoutGrid className="h-2.5 w-2.5" /></a>
-                ) : null}
-                {b.figma_file_key ? (
-                  <a href={`https://www.figma.com/design/${b.figma_file_key}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><ExternalLink className="h-2.5 w-2.5" /></a>
-                ) : null}
-              </span>
-            ))}
+      {/* ── Top toolbar: spans above both panels ── */}
+      <div className="flex-shrink-0 flex items-start px-4 pt-3 pb-2">
+        {/* Left: back + title (occupies same width as left panel below) */}
+        <div className={cn(
+          'flex items-center gap-2 shrink-0 pt-2 transition-all duration-300',
+          previewPanelOpen ? 'w-[525px]' : 'w-auto'
+        )}>
+          <Link
+            href={sprintId ? '/briefing-assistant' : '/sheets'}
+            className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
+            aria-label={sprintId ? 'Back to Briefing Assistant' : 'Back to sheets'}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </Link>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-foreground/90 truncate max-w-[180px]" title={sprintData?.name ?? 'Sprint'}>
+              {sprintData?.name ?? 'Sprint'}
+            </span>
+            {sprintData?.batches?.length ? (
+              <div className="flex items-center gap-2">
+                {sprintData.batches.map((b) => (
+                  <span key={b.batch_key} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                    {b.batch_label}
+                    {b.monday_board_id ? (
+                      <a href={`https://loopearplugs.monday.com/boards/${b.monday_board_id}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><LayoutGrid className="h-2.5 w-2.5" /></a>
+                    ) : null}
+                    {b.figma_file_key ? (
+                      <a href={`https://www.figma.com/design/${b.figma_file_key}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><ExternalLink className="h-2.5 w-2.5" /></a>
+                    ) : null}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-
-      {/* ── Row 2: Ribbon (grouped controls with labels) ── */}
-      <header className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-sm flex items-stretch px-3">
-
-        {/* Group: Product */}
-        <div className="flex flex-col items-center justify-center gap-1 py-1.5 px-3">
-          <div className="flex items-center">
-            <BriefingGeneratorPanel
-              onGenerate={async (product, datasources) => {
-                await Promise.resolve()
-                if (typeof window !== 'undefined' && window.console) {
-                  window.console.info('Generate angles (placeholder):', { product, datasources })
-                }
-              }}
-            />
-          </div>
-          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-widest font-medium">Angles</span>
         </div>
 
-        {/* Divider */}
-        <div className="w-px bg-border/50 my-1.5 shrink-0" />
+        {/* Right-aligned: Product & Data Sources + Generate + data actions */}
+        <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0">
+          <BriefingGeneratorPanel
+            onGenerate={async (product, datasources) => {
+              setError(null)
+              try {
+                const res = await fetch('/api/briefing-assistant/angles', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    assignmentId: selectedAssignmentId ?? 'generate',
+                    productOrUseCase: product,
+                    sourceIds: datasources,
+                  }),
+                })
+                const data = await res.json()
+                if (!res.ok) {
+                  setError(data.error ?? 'Angle generation failed')
+                  return
+                }
+                const count = data.angles?.length ?? 0
+                setError(null)
+                window.alert(`Generated ${count} angle${count !== 1 ? 's' : ''} for ${product}.\n\n${data.angles?.map((a: { title: string; hook: string }) => `${a.title}: ${a.hook}`).join('\n') ?? '(none)'}`)
+              } catch {
+                setError('Angle generation request failed')
+              }
+            }}
+          />
 
-        {/* Group: Actions */}
-        <div className="flex flex-col items-center justify-center gap-1 py-1.5 px-3">
-          <div className="flex items-center gap-1">
+          {/* Data actions: Split, Import, + */}
+          <div className="rounded-lg border border-border bg-card shadow-sm flex items-center gap-0.5 p-1 shrink-0">
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setSplitDropdownOpen((o) => !o)}
-                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
               >
-                <Play className="h-4 w-4" />
-                <span className="text-[10px] font-medium">Split</span>
+                <Play className="h-3 w-3" />
+                Split
+                <ChevronDown className={cn('h-3 w-3 transition-transform', splitDropdownOpen && 'rotate-180')} />
               </button>
               {splitDropdownOpen ? (
-                <div className="absolute top-full left-0 mt-1 z-50 rounded-lg border border-border bg-card shadow-lg p-3 min-w-[280px]">
+                <div className="absolute top-full right-0 mt-1 z-50 rounded-lg border border-border bg-card shadow-lg p-3 min-w-[280px]">
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="flex flex-col gap-1">
                       <label className="text-muted-foreground text-xs">Batch</label>
@@ -470,28 +485,25 @@ export function BriefingAssistantSheet({
               <button
                 type="button"
                 onClick={() => { setImportDrawerOpen(true); setImportBatchKey(batchesWithBoard[0]?.batch_key ?? null); if (batchesWithBoard[0]?.monday_board_id) fetchBoardItems(batchesWithBoard[0].monday_board_id); }}
-                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
               >
-                <Download className="h-4 w-4" />
-                <span className="text-[10px] font-medium">Import</span>
+                <Download className="h-3 w-3" />
+                Import
               </button>
             ) : null}
             {sprintId && (sprintData?.batches?.length ?? 0) > 0 ? (
               <button
                 type="button"
                 onClick={handleNewBrief}
-                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
                 aria-label="New brief"
               >
-                <Plus className="h-4 w-4" />
-                <span className="text-[10px] font-medium">New brief</span>
+                <Plus className="h-3.5 w-3.5" />
               </button>
             ) : null}
           </div>
-          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-widest font-medium">Data</span>
         </div>
-
-      </header>
+      </div>
 
       {/* Import modal (lives outside toolbar flow) */}
       {importDrawerOpen ? (
@@ -570,23 +582,25 @@ export function BriefingAssistantSheet({
         </div>
       ) : null}
 
-      {/* Error / split result toast-style below toolbar */}
+      {/* Error / split result toast */}
       {error || splitResult ? (
-        <div className="flex-shrink-0 px-4 py-1.5 border-b border-border/40 bg-card/40">
+        <div className="flex-shrink-0 px-5 py-1.5">
           {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
           {splitResult ? <p className="text-[11px] text-muted-foreground/70">{splitResult.allocation.briefCount} briefs · {splitResult.allocation.totalAssets} assets</p> : null}
         </div>
       ) : null}
 
-      <div className="flex flex-1 min-h-0">
-        <aside
+      <div className="flex flex-1 min-h-0 px-4 pb-4 pt-1 gap-3">
+        {/* Left panel: detached card surface */}
+        <div
           className={cn(
-            'flex-shrink-0 border-r border-primary/20 bg-primary/[0.03] flex flex-col transition-all duration-300 ease-in-out',
-            previewPanelOpen ? 'w-[380px] pt-4 pb-4' : 'w-0 overflow-hidden border-r-0'
+            'flex-shrink-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm flex flex-col transition-all duration-300 ease-in-out',
+            previewPanelOpen ? 'w-[480px]' : 'w-0'
           )}
         >
-          {previewPanelOpen ? (
-            <BriefingWorkingDocPanel
+          <aside className="flex-1 flex flex-col min-h-0 bg-primary/[0.03] pt-4 pb-4 px-4">
+            {previewPanelOpen ? (
+              <BriefingWorkingDocPanel
               assignmentId={selected?.id ?? null}
               briefName={selected?.briefName}
               sections={selected?.workingDocSections}
@@ -606,15 +620,13 @@ export function BriefingAssistantSheet({
               } : undefined}
             />
           ) : null}
-        </aside>
+          </aside>
+        </div>
 
         <button
           type="button"
           onClick={() => setPreviewPanelOpen((v) => !v)}
-          className={cn(
-            'flex-shrink-0 flex items-center justify-center w-5 hover:bg-muted/40 transition-colors',
-            'text-muted-foreground/40 hover:text-muted-foreground/70 border-r border-border/30'
-          )}
+          className="flex-shrink-0 flex items-center justify-center w-5 rounded hover:bg-muted/40 transition-colors text-muted-foreground/40 hover:text-muted-foreground/70"
           aria-label={previewPanelOpen ? 'Hide working doc' : 'Show working doc'}
         >
           {previewPanelOpen ? (
@@ -624,7 +636,7 @@ export function BriefingAssistantSheet({
           )}
         </button>
 
-        <div className="flex flex-col flex-1 min-w-0">
+        <div className="flex flex-col flex-1 min-w-0 rounded-lg border border-border bg-card shadow-sm overflow-hidden">
           <BriefingAssignmentsTable
             assignments={assignmentsWithLinks}
             selectedId={selectedAssignmentId}
