@@ -380,231 +380,203 @@ export function BriefingAssistantSheet({
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
-      <header className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-sm">
-        <div className="px-5 py-3.5">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-4 min-w-0">
-              <Link
-                href={sprintId ? '/briefing-assistant' : '/sheets'}
-                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-                aria-label={sprintId ? 'Back to Briefing Assistant' : 'Back to sheets'}
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </Link>
-              <div className="flex items-center gap-2.5 flex-shrink-0">
-                <span className="text-lg font-semibold tracking-tight text-foreground">
-                  Heimdall
-                </span>
-                <span className="text-xs text-muted-foreground/40 font-medium">
-                  Briefing Assistant
-                </span>
-                {sprintData?.name ? (
-                  <span className="text-sm text-muted-foreground font-medium truncate max-w-[200px]" title={sprintData.name}>
-                    — {sprintData.name}
-                  </span>
+
+      {/* ── Row 1: Title bar (thin) ── */}
+      <div className="flex-shrink-0 h-8 border-b border-border/40 bg-card/60 flex items-center px-3 gap-2">
+        <Link
+          href={sprintId ? '/briefing-assistant' : '/sheets'}
+          className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
+          aria-label={sprintId ? 'Back to Briefing Assistant' : 'Back to sheets'}
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+        </Link>
+        <span className="text-[12px] font-medium text-foreground/80 truncate max-w-[200px]" title={sprintData?.name ?? 'Sprint'}>
+          {sprintData?.name ?? 'Sprint'}
+        </span>
+        {sprintData?.batches?.length ? (
+          <div className="flex items-center gap-2 ml-1">
+            {sprintData.batches.map((b) => (
+              <span key={b.batch_key} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground/60">
+                {b.batch_label}
+                {b.monday_board_id ? (
+                  <a href={`https://loopearplugs.monday.com/boards/${b.monday_board_id}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><LayoutGrid className="h-2.5 w-2.5" /></a>
                 ) : null}
-              </div>
-              {sprintData?.batches?.length ? (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {sprintData.batches.map((b) => (
-                    <span
-                      key={b.batch_key}
-                      className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
-                    >
-                      {b.batch_label}
-                      {b.monday_board_id ? (
-                        <a
-                          href={`https://loopearplugs.monday.com/boards/${b.monday_board_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label="Open Monday board"
-                        >
-                          <LayoutGrid className="h-3 w-3" />
-                        </a>
-                      ) : null}
-                      {b.figma_file_key ? (
-                        <a
-                          href={`https://www.figma.com/design/${b.figma_file_key}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label="Open Figma file"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : null}
-                    </span>
-                  ))}
+                {b.figma_file_key ? (
+                  <a href={`https://www.figma.com/design/${b.figma_file_key}`} target="_blank" rel="noopener noreferrer" className="hover:text-foreground"><ExternalLink className="h-2.5 w-2.5" /></a>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── Row 2: Ribbon (grouped controls with labels) ── */}
+      <header className="flex-shrink-0 border-b border-border bg-card/80 backdrop-blur-sm flex items-stretch px-3">
+
+        {/* Group: Product */}
+        <div className="flex flex-col items-center justify-center gap-1 py-1.5 px-3">
+          <div className="flex items-center">
+            <BriefingGeneratorPanel
+              onGenerate={async (product, datasources) => {
+                await Promise.resolve()
+                if (typeof window !== 'undefined' && window.console) {
+                  window.console.info('Generate angles (placeholder):', { product, datasources })
+                }
+              }}
+            />
+          </div>
+          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-widest font-medium">Angles</span>
+        </div>
+
+        {/* Divider */}
+        <div className="w-px bg-border/50 my-1.5 shrink-0" />
+
+        {/* Group: Actions */}
+        <div className="flex flex-col items-center justify-center gap-1 py-1.5 px-3">
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setSplitDropdownOpen((o) => !o)}
+                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+              >
+                <Play className="h-4 w-4" />
+                <span className="text-[10px] font-medium">Split</span>
+              </button>
+              {splitDropdownOpen ? (
+                <div className="absolute top-full left-0 mt-1 z-50 rounded-lg border border-border bg-card shadow-lg p-3 min-w-[280px]">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-muted-foreground text-xs">Batch</label>
+                      <input type="text" value={batchKey} onChange={(e) => setBatchKey(e.target.value)} placeholder="2026-01" className="w-24 rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-muted-foreground text-xs">Assets</label>
+                      <input type="number" min={1} value={totalAssets} onChange={(e) => setTotalAssets(Number(e.target.value) || 210)} className="w-20 rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-muted-foreground text-xs">Max briefs</label>
+                      <input type="number" min={1} value={maxBriefs} onChange={(e) => setMaxBriefs(Number(e.target.value) || 53)} className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                    </div>
+                    <Button onClick={() => { runSplit(); setSplitDropdownOpen(false); }} disabled={loading} size="sm">
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                      <span className="ml-2">Run</span>
+                    </Button>
+                  </div>
                 </div>
               ) : null}
             </div>
+            {sprintId && batchesWithBoard.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => { setImportDrawerOpen(true); setImportBatchKey(batchesWithBoard[0]?.batch_key ?? null); if (batchesWithBoard[0]?.monday_board_id) fetchBoardItems(batchesWithBoard[0].monday_board_id); }}
+                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+              >
+                <Download className="h-4 w-4" />
+                <span className="text-[10px] font-medium">Import</span>
+              </button>
+            ) : null}
+            {sprintId && (sprintData?.batches?.length ?? 0) > 0 ? (
+              <button
+                type="button"
+                onClick={handleNewBrief}
+                className="inline-flex flex-col items-center gap-0.5 px-3 py-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                aria-label="New brief"
+              >
+                <Plus className="h-4 w-4" />
+                <span className="text-[10px] font-medium">New brief</span>
+              </button>
+            ) : null}
+          </div>
+          <span className="text-[9px] text-muted-foreground/50 uppercase tracking-widest font-medium">Data</span>
+        </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSplitDropdownOpen((o) => !o)}
-                  aria-expanded={splitDropdownOpen}
-                >
-                  <Play className="h-4 w-4" />
-                  <span className="ml-2">Split</span>
-                  <ChevronDown className={cn('h-4 w-4 ml-1 transition-transform', splitDropdownOpen && 'rotate-180')} />
-                </Button>
-                {splitDropdownOpen ? (
-                  <div className="absolute top-full left-0 mt-1 z-50 rounded-lg border border-border bg-card shadow-lg p-3 min-w-[280px]">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-muted-foreground text-xs">Batch</label>
+      </header>
+
+      {/* Import modal (lives outside toolbar flow) */}
+      {importDrawerOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h2 className="text-lg font-semibold text-foreground">Import from Monday</h2>
+              <button type="button" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50" aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="px-4 py-2 border-b border-border flex items-center gap-2">
+              <label className="text-sm text-muted-foreground">Board (batch):</label>
+              <select
+                value={importBatchKey ?? ''}
+                onChange={(e) => {
+                  const key = e.target.value || null
+                  setImportBatchKey(key)
+                  const batch = sprintData?.batches?.find((b) => b.batch_key === key)
+                  if (batch?.monday_board_id) fetchBoardItems(batch.monday_board_id)
+                }}
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+              >
+                {batchesWithBoard.map((b) => (
+                  <option key={b.batch_key} value={b.batch_key}>{b.batch_label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto p-4">
+              {boardItemsLoading ? (
+                <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+              ) : boardItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8">No items on this board, or board not accessible.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {boardItems.map((item) => {
+                    const alreadyImported = existingMondayIds.has(item.id)
+                    const checked = selectedMondayIds.has(item.id)
+                    return (
+                      <li key={item.id} className={cn('flex items-center gap-2 py-2 px-2 rounded-md', alreadyImported && 'opacity-60')}>
                         <input
-                          type="text"
-                          value={batchKey}
-                          onChange={(e) => setBatchKey(e.target.value)}
-                          placeholder="2026-01"
-                          className="w-24 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                          type="checkbox"
+                          id={`import-${item.id}`}
+                          checked={alreadyImported || checked}
+                          disabled={alreadyImported}
+                          onChange={() => {
+                            if (alreadyImported) return
+                            setSelectedMondayIds((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(item.id)) next.delete(item.id)
+                              else next.add(item.id)
+                              return next
+                            })
+                          }}
+                          className="rounded border-border"
                         />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-muted-foreground text-xs">Assets</label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={totalAssets}
-                          onChange={(e) => setTotalAssets(Number(e.target.value) || 210)}
-                          className="w-20 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-muted-foreground text-xs">Max briefs</label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={maxBriefs}
-                          onChange={(e) => setMaxBriefs(Number(e.target.value) || 53)}
-                          className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                        />
-                      </div>
-                      <Button onClick={() => { runSplit(); setSplitDropdownOpen(false); }} disabled={loading} size="sm">
-                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                        <span className="ml-2">Run split</span>
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              {sprintId && batchesWithBoard.length > 0 ? (
-                <Button variant="outline" size="sm" onClick={() => { setImportDrawerOpen(true); setImportBatchKey(batchesWithBoard[0]?.batch_key ?? null); if (batchesWithBoard[0]?.monday_board_id) fetchBoardItems(batchesWithBoard[0].monday_board_id); }}>
-                  <Download className="h-4 w-4" />
-                  <span className="ml-2">Import from Monday</span>
-                </Button>
-              ) : null}
-              {sprintId && (sprintData?.batches?.length ?? 0) > 0 ? (
-                <Button variant="outline" size="sm" onClick={handleNewBrief}>
-                  <Plus className="h-4 w-4" />
-                  <span className="ml-2">New brief</span>
-                </Button>
-              ) : null}
+                        <label htmlFor={`import-${item.id}`} className="flex-1 text-sm cursor-pointer truncate">
+                          {item.name}
+                          {item.group ? <span className="text-muted-foreground ml-1">({item.group})</span> : null}
+                          {alreadyImported ? <span className="text-muted-foreground ml-1">— already imported</span> : null}
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+              <Button variant="outline" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }}>Cancel</Button>
+              <Button onClick={handleImportConfirm} disabled={selectedMondayIds.size === 0 || importSaving}>
+                {importSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                <span className="ml-2">Import {selectedMondayIds.size > 0 ? selectedMondayIds.size : ''} selected</span>
+              </Button>
             </div>
           </div>
-
-          {importDrawerOpen ? (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-              <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] flex flex-col">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                  <h2 className="text-lg font-semibold text-foreground">Import from Monday</h2>
-                  <button type="button" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50" aria-label="Close">
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <div className="px-4 py-2 border-b border-border flex items-center gap-2">
-                  <label className="text-sm text-muted-foreground">Board (batch):</label>
-                  <select
-                    value={importBatchKey ?? ''}
-                    onChange={(e) => {
-                      const key = e.target.value || null
-                      setImportBatchKey(key)
-                      const batch = sprintData?.batches?.find((b) => b.batch_key === key)
-                      if (batch?.monday_board_id) fetchBoardItems(batch.monday_board_id)
-                    }}
-                    className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                  >
-                    {batchesWithBoard.map((b) => (
-                      <option key={b.batch_key} value={b.batch_key}>{b.batch_label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex-1 min-h-0 overflow-auto p-4">
-                  {boardItemsLoading ? (
-                    <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-                  ) : boardItems.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-8">No items on this board, or board not accessible.</p>
-                  ) : (
-                    <ul className="space-y-1">
-                      {boardItems.map((item) => {
-                        const alreadyImported = existingMondayIds.has(item.id)
-                        const checked = selectedMondayIds.has(item.id)
-                        return (
-                          <li key={item.id} className={cn('flex items-center gap-2 py-2 px-2 rounded-md', alreadyImported && 'opacity-60')}>
-                            <input
-                              type="checkbox"
-                              id={`import-${item.id}`}
-                              checked={alreadyImported || checked}
-                              disabled={alreadyImported}
-                              onChange={() => {
-                                if (alreadyImported) return
-                                setSelectedMondayIds((prev) => {
-                                  const next = new Set(prev)
-                                  if (next.has(item.id)) next.delete(item.id)
-                                  else next.add(item.id)
-                                  return next
-                                })
-                              }}
-                              className="rounded border-border"
-                            />
-                            <label htmlFor={`import-${item.id}`} className="flex-1 text-sm cursor-pointer truncate">
-                              {item.name}
-                              {item.group ? <span className="text-muted-foreground ml-1">({item.group})</span> : null}
-                              {alreadyImported ? <span className="text-muted-foreground ml-1">— already imported</span> : null}
-                            </label>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
-                </div>
-                <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-                  <Button variant="outline" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }}>Cancel</Button>
-                  <Button onClick={handleImportConfirm} disabled={selectedMondayIds.size === 0 || importSaving}>
-                    {importSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    <span className="ml-2">Import {selectedMondayIds.size > 0 ? selectedMondayIds.size : ''} selected</span>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {error ? (
-            <p className="mt-2 text-sm text-destructive">{error}</p>
-          ) : null}
-          {splitResult ? (
-            <p className="mt-1.5 text-[11px] text-muted-foreground/70">
-              {splitResult.allocation.briefCount} briefs · {splitResult.allocation.totalAssets} assets
-            </p>
-          ) : null}
         </div>
+      ) : null}
 
-        <div className="px-5 pb-3">
-          <BriefingGeneratorPanel
-            onGenerate={async (product, datasources) => {
-              await Promise.resolve()
-              if (typeof window !== 'undefined' && window.console) {
-                window.console.info('Generate angles (placeholder):', { product, datasources })
-              }
-            }}
-            defaultCollapsed
-          />
+      {/* Error / split result toast-style below toolbar */}
+      {error || splitResult ? (
+        <div className="flex-shrink-0 px-4 py-1.5 border-b border-border/40 bg-card/40">
+          {error ? <p className="text-[11px] text-destructive">{error}</p> : null}
+          {splitResult ? <p className="text-[11px] text-muted-foreground/70">{splitResult.allocation.briefCount} briefs · {splitResult.allocation.totalAssets} assets</p> : null}
         </div>
-      </header>
+      ) : null}
 
       <div className="flex flex-1 min-h-0">
         <aside
