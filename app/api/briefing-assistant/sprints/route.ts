@@ -51,10 +51,18 @@ export async function GET() {
 
   const sprintIds = sprints.map((s) => s.id)
 
-  const { data: batches } = await db
+  const batchCols = 'sprint_id, batch_key, batch_label, monday_board_id, figma_file_key'
+  const batchResult = await db
     .from('briefing_sprint_batches')
-    .select('sprint_id, batch_key, batch_label, batch_type, monday_board_id, figma_file_key')
+    .select(`${batchCols}, batch_type`)
     .in('sprint_id', sprintIds)
+  let batches: Array<{ sprint_id: string; batch_key: string; batch_label: string; monday_board_id: string | null; figma_file_key: string | null; batch_type?: string }>
+  if (batchResult.error) {
+    const fallback = await db.from('briefing_sprint_batches').select(batchCols).in('sprint_id', sprintIds)
+    batches = (fallback.data ?? []).map((b) => ({ ...b, batch_type: 'monthly' }))
+  } else {
+    batches = (batchResult.data ?? []).map((b) => ({ ...b, batch_type: (b as { batch_type?: string }).batch_type ?? 'monthly' }))
+  }
 
   const { data: assignmentCounts } = await db
     .from('briefing_assignments')
@@ -70,7 +78,7 @@ export async function GET() {
     assignmentCountBySprint.set(s, 0)
     batchesBySprint.set(s, [])
   }
-  for (const b of batches ?? []) {
+  for (const b of batches) {
     batchCountBySprint.set(b.sprint_id, (batchCountBySprint.get(b.sprint_id) ?? 0) + 1)
     const list = batchesBySprint.get(b.sprint_id) ?? []
     list.push(b)
@@ -87,10 +95,10 @@ export async function GET() {
     updated_at: s.updated_at,
     batch_count: batchCountBySprint.get(s.id) ?? 0,
     assignment_count: assignmentCountBySprint.get(s.id) ?? 0,
-    batches: (batchesBySprint.get(s.id) ?? []).map((b) => ({
+    batches: (batchesBySprint.get(s.id) ?? []).map((b: { batch_key: string; batch_label: string; batch_type?: string; monday_board_id: string | null; figma_file_key: string | null }) => ({
       batch_key: b.batch_key,
       batch_label: b.batch_label,
-      batch_type: (b as { batch_type?: string }).batch_type ?? 'monthly',
+      batch_type: b.batch_type ?? 'monthly',
       monday_board_id: b.monday_board_id ?? null,
       figma_file_key: b.figma_file_key ?? null,
     })),
@@ -137,7 +145,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (batchList?.length) {
-    const rows = batchList.map((b) => ({
+    const rowsWithType = batchList.map((b) => ({
       sprint_id: sprint.id,
       batch_key: b.batch_key,
       batch_label: b.batch_label,
@@ -145,9 +153,19 @@ export async function POST(req: NextRequest) {
       monday_board_id: b.monday_board_id ?? null,
       figma_file_key: b.figma_file_key ?? null,
     }))
-    const { error: batchErr } = await db.from('briefing_sprint_batches').insert(rows)
+    const rowsWithoutType = batchList.map((b) => ({
+      sprint_id: sprint.id,
+      batch_key: b.batch_key,
+      batch_label: b.batch_label,
+      monday_board_id: b.monday_board_id ?? null,
+      figma_file_key: b.figma_file_key ?? null,
+    }))
+    const { error: batchErr } = await db.from('briefing_sprint_batches').insert(rowsWithType)
     if (batchErr) {
-      return NextResponse.json({ error: batchErr.message }, { status: 500 })
+      const { error: fallbackErr } = await db.from('briefing_sprint_batches').insert(rowsWithoutType)
+      if (fallbackErr) {
+        return NextResponse.json({ error: fallbackErr.message }, { status: 500 })
+      }
     }
   }
 

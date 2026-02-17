@@ -4,11 +4,20 @@ import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 
+const WorkingDocSectionsSchema = z.record(z.string(), z.string()).optional()
+
 const PatchSchema = z.object({
-  monday_item_id: z.string().optional(),
+  monday_item_id: z.string().optional().nullable(),
   figma_page_url: z.string().url().optional().nullable(),
   status: z.enum(['draft', 'edited', 'approved', 'synced_to_monday', 'queued']).optional(),
   target_board_id: z.string().nullable().optional(),
+  brief_name: z.string().min(1).optional(),
+  product_or_use_case: z.string().optional(),
+  format: z.string().optional(),
+  funnel: z.string().optional(),
+  agency_ref: z.string().optional(),
+  asset_count: z.number().int().min(1).optional(),
+  working_doc_sections: WorkingDocSectionsSchema,
 })
 
 /**
@@ -50,6 +59,13 @@ export async function PATCH(
   if (parsed.data.figma_page_url !== undefined) updates.figma_page_url = parsed.data.figma_page_url
   if (parsed.data.status !== undefined) updates.status = parsed.data.status
   if (parsed.data.target_board_id !== undefined) updates.target_board_id = parsed.data.target_board_id
+  if (parsed.data.brief_name !== undefined) updates.brief_name = parsed.data.brief_name
+  if (parsed.data.product_or_use_case !== undefined) updates.product_or_use_case = parsed.data.product_or_use_case
+  if (parsed.data.format !== undefined) updates.format = parsed.data.format
+  if (parsed.data.funnel !== undefined) updates.funnel = parsed.data.funnel
+  if (parsed.data.agency_ref !== undefined) updates.agency_ref = parsed.data.agency_ref
+  if (parsed.data.asset_count !== undefined) updates.asset_count = parsed.data.asset_count
+  if (parsed.data.working_doc_sections !== undefined) updates.working_doc_sections = parsed.data.working_doc_sections
 
   const { data: byId } = await db
     .from('briefing_assignments')

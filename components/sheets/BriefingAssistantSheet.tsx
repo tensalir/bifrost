@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Loader2,
   LayoutGrid,
   Play,
@@ -17,9 +18,10 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { BriefingGeneratorPanel } from './BriefingGeneratorPanel'
 import { BriefingWorkingDocPanel } from './BriefingWorkingDocPanel'
-import { BriefingAssignmentsTable, type AssignmentRow } from './BriefingAssignmentsTable'
-import type { BriefingAssignment } from '@/src/domain/briefingAssistant/schema'
+import { BriefingAssignmentsTable, type AssignmentRow, type AssignmentPatch } from './BriefingAssignmentsTable'
+import type { BriefingAssignment, WorkingDocSections } from '@/src/domain/briefingAssistant/schema'
 import type { SplitOutput } from '@/src/domain/briefingAssistant/split'
 
 const DEFAULT_BATCH_KEY = '2026-01'
@@ -50,6 +52,7 @@ interface PersistedAssignment {
   status?: string
   source?: string
   targetBoardId?: string | null
+  workingDocSections?: WorkingDocSections
 }
 
 interface MondayBoardItem {
@@ -84,6 +87,7 @@ export function BriefingAssistantSheet({
   const [selectedMondayIds, setSelectedMondayIds] = useState<Set<string>>(new Set())
   const [importSaving, setImportSaving] = useState(false)
   const [feedbackStatusMap, setFeedbackStatusMap] = useState<Record<string, { hasExperiment: boolean; roles: string[]; sentToMonday: boolean }>>({})
+  const [splitDropdownOpen, setSplitDropdownOpen] = useState(false)
 
   const firstBatch = sprintData?.batches?.[0]
   const [batchKey, setBatchKey] = useState(firstBatch?.batch_key ?? DEFAULT_BATCH_KEY)
@@ -334,6 +338,7 @@ export function BriefingAssistantSheet({
       mondayItemId: ext?.mondayItemId,
       figmaPageUrl: ext?.figmaPageUrl,
       targetBoardId: ext?.targetBoardId ?? a.targetBoardId,
+      workingDocSections: ext?.workingDocSections,
     }
   })
   const batchBoardMap: Record<string, string> = {}
@@ -341,7 +346,7 @@ export function BriefingAssistantSheet({
     if (b.monday_board_id) batchBoardMap[b.batch_key] = b.monday_board_id
   }
   const availableBoards = (sprintData?.batches ?? []).filter((b) => b.monday_board_id).map((b) => ({ batch_key: b.batch_key, label: b.batch_label, board_id: b.monday_board_id! }))
-  const selected = assignments.find((a) => a.id === selectedAssignmentId)
+  const selected = assignmentsWithLinks.find((a) => a.id === selectedAssignmentId)
 
   const mondayItemIdsForFeedback = (initialAssignments ?? [])
     .map((a) => a.mondayItemId)
@@ -435,45 +440,59 @@ export function BriefingAssistantSheet({
               ) : null}
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-muted-foreground text-xs">Batch</label>
-                <input
-                  type="text"
-                  value={batchKey}
-                  onChange={(e) => setBatchKey(e.target.value)}
-                  placeholder="2026-01"
-                  className="w-24 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-muted-foreground text-xs">Assets</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={totalAssets}
-                  onChange={(e) => setTotalAssets(Number(e.target.value) || 210)}
-                  className="w-20 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-muted-foreground text-xs">Max briefs</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={maxBriefs}
-                  onChange={(e) => setMaxBriefs(Number(e.target.value) || 53)}
-                  className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-                />
-              </div>
-              <Button onClick={runSplit} disabled={loading} size="sm">
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSplitDropdownOpen((o) => !o)}
+                  aria-expanded={splitDropdownOpen}
+                >
                   <Play className="h-4 w-4" />
-                )}
-                <span className="ml-2">Run split</span>
-              </Button>
+                  <span className="ml-2">Split</span>
+                  <ChevronDown className={cn('h-4 w-4 ml-1 transition-transform', splitDropdownOpen && 'rotate-180')} />
+                </Button>
+                {splitDropdownOpen ? (
+                  <div className="absolute top-full left-0 mt-1 z-50 rounded-lg border border-border bg-card shadow-lg p-3 min-w-[280px]">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-muted-foreground text-xs">Batch</label>
+                        <input
+                          type="text"
+                          value={batchKey}
+                          onChange={(e) => setBatchKey(e.target.value)}
+                          placeholder="2026-01"
+                          className="w-24 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-muted-foreground text-xs">Assets</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={totalAssets}
+                          onChange={(e) => setTotalAssets(Number(e.target.value) || 210)}
+                          className="w-20 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-muted-foreground text-xs">Max briefs</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={maxBriefs}
+                          onChange={(e) => setMaxBriefs(Number(e.target.value) || 53)}
+                          className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                      <Button onClick={() => { runSplit(); setSplitDropdownOpen(false); }} disabled={loading} size="sm">
+                        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                        <span className="ml-2">Run split</span>
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               {sprintId && batchesWithBoard.length > 0 ? (
                 <Button variant="outline" size="sm" onClick={() => { setImportDrawerOpen(true); setImportBatchKey(batchesWithBoard[0]?.batch_key ?? null); if (batchesWithBoard[0]?.monday_board_id) fetchBoardItems(batchesWithBoard[0].monday_board_id); }}>
                   <Download className="h-4 w-4" />
@@ -573,6 +592,18 @@ export function BriefingAssistantSheet({
             </p>
           ) : null}
         </div>
+
+        <div className="px-5 pb-3">
+          <BriefingGeneratorPanel
+            onGenerate={async (product, datasources) => {
+              await Promise.resolve()
+              if (typeof window !== 'undefined' && window.console) {
+                window.console.info('Generate angles (placeholder):', { product, datasources })
+              }
+            }}
+            defaultCollapsed
+          />
+        </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
@@ -584,9 +615,23 @@ export function BriefingAssistantSheet({
         >
           {previewPanelOpen ? (
             <BriefingWorkingDocPanel
+              assignmentId={selected?.id ?? null}
               briefName={selected?.briefName}
-              sections={undefined}
-              readOnly
+              sections={selected?.workingDocSections}
+              readOnly={!sprintId}
+              onSaveSections={sprintId ? async (assignmentId, nextSections) => {
+                try {
+                  const res = await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments/${assignmentId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ working_doc_sections: nextSections }),
+                  })
+                  if (res.ok) onSprintUpdated?.()
+                  else setError('Failed to save working doc')
+                } catch {
+                  setError('Failed to save working doc')
+                }
+              } : undefined}
             />
           ) : null}
         </aside>
@@ -627,6 +672,30 @@ export function BriefingAssistantSheet({
                 setError('Failed to update board')
               }
             } : undefined}
+            onPatch={sprintId ? async (assignmentId, patch) => {
+              try {
+                const body: Record<string, unknown> = {}
+                if (patch.briefName !== undefined) body.brief_name = patch.briefName
+                if (patch.productOrUseCase !== undefined) body.product_or_use_case = patch.productOrUseCase
+                if (patch.format !== undefined) body.format = patch.format
+                if (patch.funnel !== undefined) body.funnel = patch.funnel
+                if (patch.agencyRef !== undefined) body.agency_ref = patch.agencyRef
+                if (patch.assetCount !== undefined) body.asset_count = patch.assetCount
+                if (patch.mondayItemId !== undefined) body.monday_item_id = patch.mondayItemId
+                if (patch.targetBoardId !== undefined) body.target_board_id = patch.targetBoardId
+                if (Object.keys(body).length === 0) return
+                const res = await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments/${assignmentId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(body),
+                })
+                if (res.ok) onSprintUpdated?.()
+                else setError('Failed to save')
+              } catch {
+                setError('Failed to save')
+              }
+            } : undefined}
+            onAddRow={sprintId && (sprintData?.batches?.length ?? 0) > 0 ? handleNewBrief : undefined}
             feedbackStatusMap={feedbackStatusMap}
           />
           <footer className="flex-shrink-0 border-t border-border/50 px-5 py-2 bg-card/20">

@@ -33,6 +33,7 @@ interface SprintData {
     status: string
     source?: string
     targetBoardId?: string | null
+    workingDocSections?: Record<string, string>
   }>
 }
 
@@ -74,7 +75,7 @@ export default function BriefingSprintPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="h-full flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     )
@@ -82,7 +83,7 @@ export default function BriefingSprintPage() {
 
   if (error || !sprintData) {
     return (
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="h-full flex items-center justify-center p-8">
         <p className="text-sm text-destructive">{error ?? 'Sprint not found'}</p>
       </div>
     )

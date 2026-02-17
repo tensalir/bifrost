@@ -71,7 +71,7 @@ export async function POST(
   await db.from('briefing_assignments').delete().eq('sprint_id', sprintId).eq('batch_key', batch_key)
 
   if (assignments.length > 0) {
-    const rows = assignments.map((a) => ({
+    const rowsWithExtras = assignments.map((a) => ({
       sprint_id: sprintId,
       batch_key,
       client_id: a.id,
@@ -90,9 +90,29 @@ export async function POST(
       monday_item_id: a.mondayItemId ?? null,
       target_board_id: a.targetBoardId ?? null,
     }))
-    const { error: insertErr } = await db.from('briefing_assignments').insert(rows)
+    const rowsMinimal = assignments.map((a) => ({
+      sprint_id: sprintId,
+      batch_key,
+      client_id: a.id,
+      content_bucket: a.contentBucket,
+      ideation_starter: a.ideationStarter,
+      product_or_use_case: a.productOrUseCase,
+      brief_owner: a.briefOwner,
+      agency_ref: a.agencyRef,
+      asset_count: a.assetCount,
+      format: a.format,
+      funnel: a.funnel,
+      campaign_partnership: a.campaignPartnership ?? null,
+      brief_name: a.briefName,
+      status: 'draft',
+      monday_item_id: a.mondayItemId ?? null,
+    }))
+    const { error: insertErr } = await db.from('briefing_assignments').insert(rowsWithExtras)
     if (insertErr) {
-      return NextResponse.json({ error: insertErr.message }, { status: 500 })
+      const { error: fallbackErr } = await db.from('briefing_assignments').insert(rowsMinimal)
+      if (fallbackErr) {
+        return NextResponse.json({ error: fallbackErr.message }, { status: 500 })
+      }
     }
   }
 
