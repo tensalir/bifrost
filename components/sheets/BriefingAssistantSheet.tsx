@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -9,11 +9,16 @@ import {
   Loader2,
   LayoutGrid,
   Play,
+  ExternalLink,
+  Download,
+  Plus,
+  X,
+  Check,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { BriefingWorkingDocPanel } from './BriefingWorkingDocPanel'
-import { BriefingAssignmentsTable } from './BriefingAssignmentsTable'
+import { BriefingAssignmentsTable, type AssignmentRow } from './BriefingAssignmentsTable'
 import type { BriefingAssignment } from '@/src/domain/briefingAssistant/schema'
 import type { SplitOutput } from '@/src/domain/briefingAssistant/split'
 
@@ -22,15 +27,67 @@ const DEFAULT_BATCH_LABEL = 'January 2026'
 const DEFAULT_TOTAL_ASSETS = 210
 const DEFAULT_MAX_BRIEFS = 53
 
-export function BriefingAssistantSheet() {
+export interface SprintBatch {
+  batch_key: string
+  batch_label: string
+  batch_type?: string
+  monday_board_id: string | null
+  figma_file_key: string | null
+}
+
+interface PersistedAssignment {
+  id: string
+  batchKey: string
+  briefName: string
+  productOrUseCase: string
+  agencyRef: string
+  assetCount: number
+  format: string
+  funnel: string
+  contentBucket: string
+  mondayItemId?: string
+  figmaPageUrl?: string
+  status?: string
+  source?: string
+  targetBoardId?: string | null
+}
+
+interface MondayBoardItem {
+  id: string
+  name: string
+  group: string | null
+  columnValues: Record<string, string>
+}
+
+export interface BriefingAssistantSheetProps {
+  sprintId?: string
+  sprintData?: { name: string; batches: SprintBatch[] } | null
+  initialAssignments?: PersistedAssignment[] | null
+  onSprintUpdated?: () => void
+}
+
+export function BriefingAssistantSheet({
+  sprintId,
+  sprintData,
+  initialAssignments,
+  onSprintUpdated,
+}: BriefingAssistantSheetProps = {}) {
   const [previewPanelOpen, setPreviewPanelOpen] = useState(true)
   const [splitResult, setSplitResult] = useState<SplitOutput | null>(null)
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [importDrawerOpen, setImportDrawerOpen] = useState(false)
+  const [importBatchKey, setImportBatchKey] = useState<string | null>(null)
+  const [boardItems, setBoardItems] = useState<MondayBoardItem[]>([])
+  const [boardItemsLoading, setBoardItemsLoading] = useState(false)
+  const [selectedMondayIds, setSelectedMondayIds] = useState<Set<string>>(new Set())
+  const [importSaving, setImportSaving] = useState(false)
+  const [feedbackStatusMap, setFeedbackStatusMap] = useState<Record<string, { hasExperiment: boolean; roles: string[]; sentToMonday: boolean }>>({})
 
-  const [batchKey, setBatchKey] = useState(DEFAULT_BATCH_KEY)
-  const [batchLabel, setBatchLabel] = useState(DEFAULT_BATCH_LABEL)
+  const firstBatch = sprintData?.batches?.[0]
+  const [batchKey, setBatchKey] = useState(firstBatch?.batch_key ?? DEFAULT_BATCH_KEY)
+  const [batchLabel, setBatchLabel] = useState(firstBatch?.batch_label ?? DEFAULT_BATCH_LABEL)
   const [totalAssets, setTotalAssets] = useState(DEFAULT_TOTAL_ASSETS)
   const [maxBriefs, setMaxBriefs] = useState(DEFAULT_MAX_BRIEFS)
 
@@ -55,15 +112,266 @@ export function BriefingAssistantSheet() {
       }
       setSplitResult(data)
       setSelectedAssignmentId(data.assignments?.[0]?.id ?? null)
+
+      if (sprintId && data.assignments?.length) {
+        const saveRes = await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            batch_key: batchKey,
+            batch_label: batchLabel,
+            assignments: data.assignments,
+          }),
+        })
+        if (saveRes.ok) onSprintUpdated?.()
+      }
     } catch {
       setError('Request failed')
     } finally {
       setLoading(false)
     }
-  }, [batchKey, batchLabel, totalAssets, maxBriefs])
+  }, [batchKey, batchLabel, totalAssets, maxBriefs, sprintId, onSprintUpdated])
 
-  const assignments: BriefingAssignment[] = splitResult?.assignments ?? []
+  const batchesWithBoard = (sprintData?.batches ?? []).filter((b) => b.monday_board_id)
+  const fetchBoardItems = useCallback(async (boardId: string) => {
+    setBoardItemsLoading(true)
+    setBoardItems([])
+    setSelectedMondayIds(new Set())
+    try {
+      const res = await fetch(`/api/briefing-assistant/board-items?board_id=${encodeURIComponent(boardId)}`)
+      const data = await res.json()
+      if (res.ok && Array.isArray(data.items)) {
+        setBoardItems(data.items)
+      } else {
+        setBoardItems([])
+      }
+    } catch {
+      setBoardItems([])
+    } finally {
+      setBoardItemsLoading(false)
+    }
+  }, [])
+
+  const existingMondayIds = new Set((initialAssignments ?? []).map((a) => a.mondayItemId).filter(Boolean) as string[])
+
+  const normalizeBucket = (v: string): 'bau' | 'native_style' | 'experimental' => {
+    const s = (v ?? 'bau').toString().toLowerCase().replace(/\s+/g, '_')
+    if (s === 'native_style' || s === 'experimental') return s
+    return 'bau'
+  }
+
+  const handleImportConfirm = useCallback(async () => {
+    const batch = sprintData?.batches?.find((b) => b.batch_key === importBatchKey)
+    if (!sprintId || !batch || selectedMondayIds.size === 0) return
+    setImportSaving(true)
+    try {
+      const existingForBatch = (initialAssignments ?? []).filter((a) => a.batchKey === importBatchKey)
+      const newRows = boardItems
+        .filter((item) => selectedMondayIds.has(item.id))
+        .map((item) => {
+          const cv = item.columnValues
+          return {
+            id: crypto.randomUUID(),
+            contentBucket: normalizeBucket(cv.content_bucket ?? cv.bucket ?? 'bau'),
+            ideationStarter: '',
+            productOrUseCase: cv.product ?? cv.product_or_use_case ?? cv.use_case ?? item.name ?? '—',
+            briefOwner: '',
+            agencyRef: cv.agency ?? cv.agency_ref ?? '',
+            assetCount: Math.max(1, parseInt(cv.asset_count ?? cv.assets ?? '4', 10) || 4),
+            format: cv.format ?? 'static',
+            funnel: (cv.funnel ?? 'tof').toLowerCase(),
+            batchKey: importBatchKey,
+            briefName: item.name,
+            source: 'imported' as const,
+            mondayItemId: item.id,
+            targetBoardId: batch.monday_board_id,
+          }
+        })
+      const toSave = [
+        ...existingForBatch.map((a) => ({
+          id: a.id,
+          contentBucket: a.contentBucket as 'bau' | 'native_style' | 'experimental',
+          ideationStarter: '',
+          productOrUseCase: a.productOrUseCase,
+          briefOwner: '',
+          agencyRef: a.agencyRef,
+          assetCount: a.assetCount,
+          format: a.format,
+          funnel: a.funnel,
+          batchKey: a.batchKey,
+          briefName: a.briefName,
+          source: (a.source ?? 'split') as 'split' | 'imported' | 'manual',
+          mondayItemId: a.mondayItemId,
+          targetBoardId: a.targetBoardId ?? null,
+        })),
+        ...newRows.map((a) => ({
+          id: a.id,
+          contentBucket: a.contentBucket,
+          ideationStarter: a.ideationStarter,
+          productOrUseCase: a.productOrUseCase,
+          briefOwner: a.briefOwner,
+          agencyRef: a.agencyRef,
+          assetCount: a.assetCount,
+          format: a.format,
+          funnel: a.funnel,
+          batchKey: a.batchKey,
+          briefName: a.briefName,
+          source: 'imported' as const,
+          mondayItemId: a.mondayItemId,
+          targetBoardId: a.targetBoardId,
+        })),
+      ]
+      const res = await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_key: importBatchKey,
+          batch_label: batch.batch_label,
+          assignments: toSave.map((a) => ({
+            id: a.id,
+            contentBucket: a.contentBucket,
+            ideationStarter: a.ideationStarter,
+            productOrUseCase: a.productOrUseCase,
+            briefOwner: a.briefOwner,
+            agencyRef: a.agencyRef,
+            assetCount: a.assetCount,
+            format: a.format,
+            funnel: a.funnel,
+            batchKey: a.batchKey,
+            briefName: a.briefName,
+            source: a.source ?? 'split',
+            mondayItemId: a.mondayItemId ?? undefined,
+            targetBoardId: a.targetBoardId ?? undefined,
+          })),
+        }),
+      })
+      if (res.ok) {
+        setImportDrawerOpen(false)
+        setSelectedMondayIds(new Set())
+        onSprintUpdated?.()
+      } else {
+        const data = await res.json()
+        setError(data.error ?? 'Import failed')
+      }
+    } catch {
+      setError('Import failed')
+    } finally {
+      setImportSaving(false)
+    }
+  }, [sprintId, importBatchKey, selectedMondayIds, boardItems, sprintData?.batches, initialAssignments, onSprintUpdated])
+
+  const handleNewBrief = useCallback(async () => {
+    const batch = sprintData?.batches?.find((b) => b.batch_key === batchKey) ?? firstBatch
+    const useBatchKey = batch?.batch_key ?? batchKey
+    const useBatchLabel = batch?.batch_label ?? batchLabel
+    if (!sprintId) return
+    const newRow: BriefingAssignment = {
+      id: crypto.randomUUID(),
+      contentBucket: 'bau',
+      ideationStarter: '',
+      productOrUseCase: '—',
+      briefOwner: '',
+      agencyRef: '',
+      assetCount: 4,
+      format: 'static',
+      funnel: 'tof',
+      batchKey: useBatchKey,
+      briefName: `New brief ${(initialAssignments?.length ?? 0) + 1}`,
+      source: 'manual',
+    }
+    const existingForBatch = (initialAssignments ?? []).filter((a) => a.batchKey === useBatchKey)
+    const toSave = [...existingForBatch, { ...newRow, source: 'manual' as const, targetBoardId: batch?.monday_board_id ?? null }]
+    const res = await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batch_key: useBatchKey,
+        batch_label: useBatchLabel,
+        assignments: toSave.map((a) => ({
+          id: a.id,
+          contentBucket: a.contentBucket,
+          ideationStarter: '',
+          productOrUseCase: a.productOrUseCase,
+          briefOwner: '',
+          agencyRef: a.agencyRef,
+          assetCount: a.assetCount,
+          format: a.format,
+          funnel: a.funnel,
+          batchKey: a.batchKey,
+          briefName: a.briefName,
+          source: a.source ?? 'split',
+          mondayItemId: a.mondayItemId,
+          targetBoardId: a.targetBoardId ?? null,
+        })),
+      }),
+    })
+    if (res.ok) onSprintUpdated?.()
+    else setError('Failed to add brief')
+  }, [sprintId, batchKey, batchLabel, firstBatch, sprintData?.batches, initialAssignments, onSprintUpdated])
+
+  const fromInitial = (initialAssignments ?? []).map((a) => ({
+    id: a.id,
+    contentBucket: a.contentBucket as 'bau' | 'native_style' | 'experimental',
+    ideationStarter: '',
+    productOrUseCase: a.productOrUseCase,
+    briefOwner: '',
+    agencyRef: a.agencyRef,
+    assetCount: a.assetCount,
+    format: a.format,
+    funnel: a.funnel,
+    batchKey: a.batchKey,
+    briefName: a.briefName,
+    source: (a.source ?? 'split') as 'split' | 'imported' | 'manual',
+    targetBoardId: a.targetBoardId ?? undefined,
+  }))
+  const fromSplit = splitResult?.assignments ?? []
+  const assignments: BriefingAssignment[] = fromSplit.length > 0 ? fromSplit : fromInitial
+  const initialMap = new Map((initialAssignments ?? []).map((a) => [a.id, a]))
+  const assignmentsWithLinks: AssignmentRow[] = assignments.map((a) => {
+    const ext = initialMap.get(a.id)
+    return {
+      ...a,
+      mondayItemId: ext?.mondayItemId,
+      figmaPageUrl: ext?.figmaPageUrl,
+      targetBoardId: ext?.targetBoardId ?? a.targetBoardId,
+    }
+  })
+  const batchBoardMap: Record<string, string> = {}
+  for (const b of sprintData?.batches ?? []) {
+    if (b.monday_board_id) batchBoardMap[b.batch_key] = b.monday_board_id
+  }
+  const availableBoards = (sprintData?.batches ?? []).filter((b) => b.monday_board_id).map((b) => ({ batch_key: b.batch_key, label: b.batch_label, board_id: b.monday_board_id! }))
   const selected = assignments.find((a) => a.id === selectedAssignmentId)
+
+  const mondayItemIdsForFeedback = (initialAssignments ?? [])
+    .map((a) => a.mondayItemId)
+    .filter(Boolean) as string[]
+  const feedbackIdsKey = [...new Set(mondayItemIdsForFeedback)].sort().join(',')
+  useEffect(() => {
+    if (!feedbackIdsKey) {
+      setFeedbackStatusMap({})
+      return
+    }
+    const ids = feedbackIdsKey.split(',').filter(Boolean)
+    let cancelled = false
+    fetch('/api/briefing-assistant/feedback-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monday_item_ids: ids }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.statusByItem) setFeedbackStatusMap(data.statusByItem)
+      })
+      .catch(() => { if (!cancelled) setFeedbackStatusMap({}) })
+    return () => { cancelled = true }
+  }, [feedbackIdsKey])
+
+  useEffect(() => {
+    if (assignments.length > 0 && (!selectedAssignmentId || !assignments.some((a) => a.id === selectedAssignmentId))) {
+      setSelectedAssignmentId(assignments[0].id)
+    }
+  }, [assignments, selectedAssignmentId])
 
   return (
     <div className="h-full flex flex-col bg-background text-foreground">
@@ -72,9 +380,9 @@ export function BriefingAssistantSheet() {
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-4 min-w-0">
               <Link
-                href="/sheets"
+                href={sprintId ? '/briefing-assistant' : '/sheets'}
                 className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
-                aria-label="Back to sheets"
+                aria-label={sprintId ? 'Back to Briefing Assistant' : 'Back to sheets'}
               >
                 <ArrowLeft className="h-4 w-4" />
               </Link>
@@ -85,7 +393,46 @@ export function BriefingAssistantSheet() {
                 <span className="text-xs text-muted-foreground/40 font-medium">
                   Briefing Assistant
                 </span>
+                {sprintData?.name ? (
+                  <span className="text-sm text-muted-foreground font-medium truncate max-w-[200px]" title={sprintData.name}>
+                    — {sprintData.name}
+                  </span>
+                ) : null}
               </div>
+              {sprintData?.batches?.length ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {sprintData.batches.map((b) => (
+                    <span
+                      key={b.batch_key}
+                      className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
+                    >
+                      {b.batch_label}
+                      {b.monday_board_id ? (
+                        <a
+                          href={`https://loopearplugs.monday.com/boards/${b.monday_board_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label="Open Monday board"
+                        >
+                          <LayoutGrid className="h-3 w-3" />
+                        </a>
+                      ) : null}
+                      {b.figma_file_key ? (
+                        <a
+                          href={`https://www.figma.com/design/${b.figma_file_key}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label="Open Figma file"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-3 flex-wrap">
@@ -127,8 +474,96 @@ export function BriefingAssistantSheet() {
                 )}
                 <span className="ml-2">Run split</span>
               </Button>
+              {sprintId && batchesWithBoard.length > 0 ? (
+                <Button variant="outline" size="sm" onClick={() => { setImportDrawerOpen(true); setImportBatchKey(batchesWithBoard[0]?.batch_key ?? null); if (batchesWithBoard[0]?.monday_board_id) fetchBoardItems(batchesWithBoard[0].monday_board_id); }}>
+                  <Download className="h-4 w-4" />
+                  <span className="ml-2">Import from Monday</span>
+                </Button>
+              ) : null}
+              {sprintId && (sprintData?.batches?.length ?? 0) > 0 ? (
+                <Button variant="outline" size="sm" onClick={handleNewBrief}>
+                  <Plus className="h-4 w-4" />
+                  <span className="ml-2">New brief</span>
+                </Button>
+              ) : null}
             </div>
           </div>
+
+          {importDrawerOpen ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+              <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] flex flex-col">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                  <h2 className="text-lg font-semibold text-foreground">Import from Monday</h2>
+                  <button type="button" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }} className="rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted/50" aria-label="Close">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="px-4 py-2 border-b border-border flex items-center gap-2">
+                  <label className="text-sm text-muted-foreground">Board (batch):</label>
+                  <select
+                    value={importBatchKey ?? ''}
+                    onChange={(e) => {
+                      const key = e.target.value || null
+                      setImportBatchKey(key)
+                      const batch = sprintData?.batches?.find((b) => b.batch_key === key)
+                      if (batch?.monday_board_id) fetchBoardItems(batch.monday_board_id)
+                    }}
+                    className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  >
+                    {batchesWithBoard.map((b) => (
+                      <option key={b.batch_key} value={b.batch_key}>{b.batch_label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1 min-h-0 overflow-auto p-4">
+                  {boardItemsLoading ? (
+                    <div className="flex items-center justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+                  ) : boardItems.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-8">No items on this board, or board not accessible.</p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {boardItems.map((item) => {
+                        const alreadyImported = existingMondayIds.has(item.id)
+                        const checked = selectedMondayIds.has(item.id)
+                        return (
+                          <li key={item.id} className={cn('flex items-center gap-2 py-2 px-2 rounded-md', alreadyImported && 'opacity-60')}>
+                            <input
+                              type="checkbox"
+                              id={`import-${item.id}`}
+                              checked={alreadyImported || checked}
+                              disabled={alreadyImported}
+                              onChange={() => {
+                                if (alreadyImported) return
+                                setSelectedMondayIds((prev) => {
+                                  const next = new Set(prev)
+                                  if (next.has(item.id)) next.delete(item.id)
+                                  else next.add(item.id)
+                                  return next
+                                })
+                              }}
+                              className="rounded border-border"
+                            />
+                            <label htmlFor={`import-${item.id}`} className="flex-1 text-sm cursor-pointer truncate">
+                              {item.name}
+                              {item.group ? <span className="text-muted-foreground ml-1">({item.group})</span> : null}
+                              {alreadyImported ? <span className="text-muted-foreground ml-1">— already imported</span> : null}
+                            </label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+                  <Button variant="outline" onClick={() => { setImportDrawerOpen(false); setSelectedMondayIds(new Set()); }}>Cancel</Button>
+                  <Button onClick={handleImportConfirm} disabled={selectedMondayIds.size === 0 || importSaving}>
+                    {importSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    <span className="ml-2">Import {selectedMondayIds.size > 0 ? selectedMondayIds.size : ''} selected</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {error ? (
             <p className="mt-2 text-sm text-destructive">{error}</p>
           ) : null}
@@ -174,10 +609,25 @@ export function BriefingAssistantSheet() {
 
         <div className="flex flex-col flex-1 min-w-0">
           <BriefingAssignmentsTable
-            assignments={assignments}
+            assignments={assignmentsWithLinks}
             selectedId={selectedAssignmentId}
             onSelect={setSelectedAssignmentId}
             loading={loading}
+            batchBoardMap={batchBoardMap}
+            availableBoards={availableBoards}
+            onBoardChange={sprintId ? async (assignmentId, boardId) => {
+              try {
+                await fetch(`/api/briefing-assistant/sprints/${sprintId}/assignments/${assignmentId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ target_board_id: boardId || null }),
+                })
+                onSprintUpdated?.()
+              } catch {
+                setError('Failed to update board')
+              }
+            } : undefined}
+            feedbackStatusMap={feedbackStatusMap}
           />
           <footer className="flex-shrink-0 border-t border-border/50 px-5 py-2 bg-card/20">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground/60">

@@ -50,6 +50,19 @@ feature: <name>
   src/integrations/*          # external provider clients
 ```
 
+## Unified integration foundation
+
+Tools (Briefing Assistant, Comment Summarizer, plugin) share a single integration layer so they do not duplicate vendor logic and do not interfere with each other:
+
+- **Contracts** (`src/contracts/integrations.ts`): Vendor-neutral types (`BatchRef`, `WorkItemRef`, `ResolvedBatchTarget`, `SyncOutcome`, `IntegrationError`).
+- **Providers** (`src/integrations/providers/`): `MondayProvider`, `FigmaProvider`, `FrontifyProvider` (scaffolded) wrapping raw clients.
+- **Routing** (`src/services/integrationRoutingService.ts`): Batch → canonical key, Monday board id, Figma file key (env map + optional Figma filename match).
+- **Execution guards** (`src/services/integrationExecutionGuard.ts`): Tool-namespaced idempotency keys (`briefing:monday:...`), lock keys, retryable error classification.
+- **Board reader** (`src/services/mondayBoardReader.ts`): Single paginated Monday board fetch with column enrichment; used by feedback sync and batch dropdown.
+- **Telemetry** (`src/services/integrationTelemetry.ts`): Consistent `integration` log category with `tool`, `provider`, `operation`, `durationMs`, `outcome` for dashboard/ops.
+
+New features should use these services instead of calling Monday/Figma clients directly.
+
 ## Key Integrations
 
 | Service       | Purpose                        | Config                   |

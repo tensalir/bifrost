@@ -14,6 +14,10 @@ import {
   getJobByIdempotencyKey,
   type PendingSyncJob,
 } from '../jobs/pendingFigmaSyncQueue.js'
+import {
+  buildToolIdempotencyKey,
+  buildMondayScopePayload,
+} from '../services/integrationExecutionGuard.js'
 
 export type CreateOrQueueOutcome = 'created' | 'queued' | 'skipped' | 'failed'
 
@@ -29,11 +33,11 @@ export interface CreateOrQueueResult {
 }
 
 /**
- * Build idempotency key for Monday status transition.
+ * Build idempotency key for Monday status transition. Namespaced under briefing tool.
  */
 export function buildIdempotencyKey(mondayItemId: string, statusTransitionId?: string): string {
-  if (statusTransitionId) return `monday:${mondayItemId}:${statusTransitionId}`
-  return `monday:${mondayItemId}:${Date.now()}`
+  const payload = buildMondayScopePayload(mondayItemId, statusTransitionId)
+  return buildToolIdempotencyKey('briefing', 'monday', payload)
 }
 
 /**

@@ -1,10 +1,13 @@
 /**
  * Resolve monthly Figma file from Monday batch.
- * Uses explicit mapping store (env or future DB) and naming fallback for display/plugin.
+ * Delegates to shared integration routing service.
  */
 
-import { getEnv } from '../config/env.js'
-import { parseBatchToCanonical, expectedFileNameFromCanonicalKey, type BatchParseResult } from '../domain/routing/batchToFile.js'
+import type { BatchParseResult } from '../domain/routing/batchToFile.js'
+import {
+  resolveBatchTargetSync,
+  resolveBatchTargetByCanonicalKey,
+} from '../services/integrationRoutingService.js'
 
 export interface FigmaTargetResult {
   /** Canonical month key (YYYY-MM) */
@@ -18,43 +21,17 @@ export interface FigmaTargetResult {
 }
 
 /**
- * Load batch -> file key map from env HEIMDALL_BATCH_FILE_MAP (JSON object).
- */
-function loadBatchFileMap(): Record<string, string> {
-  const env = getEnv()
-  const raw = env.HEIMDALL_BATCH_FILE_MAP
-  if (!raw || typeof raw !== 'string') return {}
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const out: Record<string, string> = {}
-      for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'string') out[k] = v
-      }
-      return out
-    }
-  } catch {
-    // ignore
-  }
-  return {}
-}
-
-/**
  * Resolve Figma target from Monday batch value.
  * Returns expected file name and optional file key from mapping.
  */
 export function resolveFigmaTarget(batch: string | null | undefined): FigmaTargetResult | null {
-  const batchParse = parseBatchToCanonical(batch)
-  if (!batchParse) return null
-
-  const map = loadBatchFileMap()
-  const fileKey = map[batchParse.canonicalKey] ?? null
-
+  const target = resolveBatchTargetSync(batch)
+  if (!target) return null
   return {
-    batchCanonical: batchParse.canonicalKey,
-    expectedFileName: batchParse.expectedFileName,
-    figmaFileKey: fileKey,
-    batchParse,
+    batchCanonical: target.batch.batchKey,
+    expectedFileName: target.batch.expectedFileName,
+    figmaFileKey: target.fileKey,
+    batchParse: target.batchParse,
   }
 }
 
@@ -62,18 +39,11 @@ export function resolveFigmaTarget(batch: string | null | undefined): FigmaTarge
  * Resolve by canonical key only (when batch already normalized).
  */
 export function resolveFigmaTargetByCanonicalKey(canonicalKey: string): FigmaTargetResult {
-  const map = loadBatchFileMap()
-  const [y, m] = canonicalKey.split('-').map(Number)
-  const batchParse: BatchParseResult = {
-    canonicalKey,
-    expectedFileName: expectedFileNameFromCanonicalKey(canonicalKey),
-    year: y,
-    month: m,
-  }
+  const target = resolveBatchTargetByCanonicalKey(canonicalKey)
   return {
-    batchCanonical: canonicalKey,
-    expectedFileName: batchParse.expectedFileName,
-    figmaFileKey: map[canonicalKey] ?? null,
-    batchParse,
+    batchCanonical: target.batch.batchKey,
+    expectedFileName: target.batch.expectedFileName,
+    figmaFileKey: target.fileKey,
+    batchParse: target.batchParse,
   }
 }

@@ -27,7 +27,10 @@ export interface WorkingDocSections {
   variants?: string
 }
 
-/** Single briefing row produced by the split engine. */
+/** How the assignment was created. */
+export type AssignmentSource = 'split' | 'imported' | 'manual'
+
+/** Single briefing row produced by the split engine, import, or manual create. */
 export interface BriefingAssignment {
   id: string
   /** Content Bucket / Asset Mix */
@@ -52,6 +55,10 @@ export interface BriefingAssignment {
   batchKey: string
   /** Human-readable brief name (e.g. Feb 1, Feb 2). */
   briefName: string
+  /** How this assignment was created. */
+  source?: AssignmentSource
+  /** Per-assignment Monday board override; when set, send-to-Monday uses this board. */
+  targetBoardId?: string | null
 }
 
 /** Generated angle (ideation output) for one assignment. */

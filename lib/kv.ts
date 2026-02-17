@@ -298,7 +298,7 @@ export async function getWebhookLog(limit = 20): Promise<WebhookLogEntry[]> {
 // ============================================================================
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
-export type LogCategory = 'webhook' | 'mapping' | 'queue' | 'figma' | 'api' | 'system'
+export type LogCategory = 'webhook' | 'mapping' | 'queue' | 'figma' | 'api' | 'system' | 'integration'
 
 export interface LogEntry {
   id: string

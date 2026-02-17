@@ -8,7 +8,6 @@ import {
   Loader2,
   ClipboardList,
   ArrowRight,
-  LayoutGrid,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Nav } from '@/components/nav'
@@ -198,23 +197,6 @@ function SheetsOverviewContent() {
                         {latestRound && ` · Latest: ${latestRound.name}`}
                       </p>
                     )}
-                  </div>
-                  <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary shrink-0" />
-                </Link>
-                <Link
-                  href="/sheets/briefing-assistant"
-                  className="group flex items-center gap-4 rounded-xl border border-border bg-card p-6 overflow-hidden hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200 text-left w-full max-w-lg"
-                >
-                  <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-primary/10 text-primary shrink-0">
-                    <LayoutGrid className="h-7 w-7" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-semibold text-foreground">
-                      Briefing Assistant
-                    </h2>
-                    <p className="text-sm text-muted-foreground mt-0.5">
-                      Run split from revenue targets, generate angles, edit working doc, approve and send to Monday.
-                    </p>
                   </div>
                   <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary shrink-0" />
                 </Link>

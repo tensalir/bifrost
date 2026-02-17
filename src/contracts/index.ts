@@ -1,3 +1,5 @@
+export * from './integrations.js'
+
 /**
  * Shared type contracts for Heimdall.
  *

@@ -4,10 +4,13 @@
 
 import { getEnv } from '../../config/env.js'
 import { logger } from '../../../lib/logger.js'
+import type { SyncOutcome } from '../../contracts/integrations.js'
+import { buildToolIdempotencyKey, buildMondayScopePayload } from '../../services/integrationExecutionGuard.js'
+import { recordIntegrationCall } from '../../services/integrationTelemetry.js'
 import { mondayGraphql } from '../../integrations/monday/client.js'
 import type { MondayItem } from '../../integrations/monday/client.js'
 import { mondayItemToBriefing } from '../../domain/briefing/mondayToBriefing.js'
-import { createOrQueueFigmaPage, buildIdempotencyKey } from '../../orchestration/createOrQueueFigmaPage.js'
+import { createOrQueueFigmaPage } from '../../orchestration/createOrQueueFigmaPage.js'
 import { resolveFigmaTarget } from '../../orchestration/resolveFigmaTarget.js'
 import { getTemplateNodeTree } from '../../integrations/figma/templateCache.js'
 import { computeNodeMapping } from '../../agents/mappingAgent.js'
@@ -142,6 +145,7 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     logger.info('webhook', 'Webhook missing boardId or itemId', { boardId: boardId || '-', itemId: itemId || '-' })
     return { received: true }
   }
+  const webhookStart = Date.now()
   logger.info('webhook', 'Webhook received', { boardId, itemId })
 
   const env = getEnv()
@@ -207,7 +211,11 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
   }
 
   const timestamp = (body as Record<string, string>).timestamp ?? new Date().toISOString()
-  const idempotencyKey = buildIdempotencyKey(itemId, timestamp)
+  const idempotencyKey = buildToolIdempotencyKey(
+    'briefing',
+    'monday',
+    buildMondayScopePayload(itemId, timestamp)
+  )
 
   let nodeMapping: Array<{ nodeName: string; value: string }> | undefined
   let frameRenames: Array<{ oldName: string; newName: string }> | undefined
@@ -251,11 +259,27 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
     experimentPageName: result.job?.experimentPageName,
   })
 
+  const syncOutcome: SyncOutcome = {
+    status: result.outcome,
+    idempotencyKey,
+    message: result.message ?? '',
+    fileKey: result.figmaFileKey,
+    jobId: result.job?.id,
+  }
+  recordIntegrationCall({
+    tool: 'briefing',
+    provider: 'monday',
+    operation: 'webhook_process',
+    durationMs: Date.now() - webhookStart,
+    outcome: result.outcome === 'queued' || result.outcome === 'created' ? 'ok' : result.outcome === 'skipped' ? 'skipped' : 'error',
+    idempotencyKey,
+    resourceId: itemId,
+  })
   return {
     received: true,
     inserted: result.outcome === 'queued' || result.outcome === 'created',
-    outcome: result.outcome,
-    message: result.message,
+    outcome: syncOutcome.status,
+    message: syncOutcome.message,
   }
 }
 
@@ -297,7 +321,11 @@ export async function queueMondayItem(
   }
 
   const suffix = options?.idempotencySuffix ?? `manual-${Date.now()}`
-  const idempotencyKey = buildIdempotencyKey(itemId, suffix)
+  const idempotencyKey = buildToolIdempotencyKey(
+    'briefing',
+    'monday',
+    buildMondayScopePayload(itemId, suffix)
+  )
 
   let nodeMapping: Array<{ nodeName: string; value: string }> | undefined
   let frameRenames: Array<{ oldName: string; newName: string }> | undefined

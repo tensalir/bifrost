@@ -184,7 +184,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // 6. Everything else (root landing, etc.)
+  // 6. Briefing Assistant: same cookie-based auth as sheets (Creative Strategists)
+  if (pathname.startsWith('/briefing-assistant')) {
+    const denied = handleSheetsAuth(request)
+    if (denied) return denied
+    return NextResponse.next()
+  }
+
+  // 7. Everything else (root landing, etc.)
   return NextResponse.next()
 }
 
@@ -194,6 +201,8 @@ export const config = {
     '/login',
     '/admin/:path*',
     '/sheets/:path*',
+    '/briefing-assistant',
+    '/briefing-assistant/:path*',
     '/auth/:path*',
     '/api/:path*',
     '/jobs/:path*',

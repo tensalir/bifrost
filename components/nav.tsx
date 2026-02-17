@@ -1,10 +1,10 @@
 'use client'
 
-import { Suspense, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Network, Settings, Puzzle, MessageSquare, ClipboardList, ScrollText, LogOut } from 'lucide-react'
+import { Network, Settings, Puzzle, MessageSquare, LayoutGrid, ScrollText, LogOut } from 'lucide-react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-auth'
 
 interface NavItem {
@@ -12,10 +12,6 @@ interface NavItem {
   href: string
   icon: React.ElementType
   external?: boolean
-  /** When set, active when pathname matches and search param equals this value (e.g. 'stakeholder' for ?tab=stakeholder) */
-  activeWhenSearch?: string
-  /** When set, active when pathname matches and search param is not this value (e.g. Figma tab when not ?tab=stakeholder) */
-  activeWhenNotSearch?: string
 }
 
 interface NavSection {
@@ -35,8 +31,8 @@ const sections: NavSection[] = [
     label: 'Tools',
     items: [
       { name: 'Heimdall Plugin', href: '/admin/plugin', icon: Puzzle },
-      { name: 'Figma Comments', href: '/sheets', icon: MessageSquare, activeWhenNotSearch: 'tab' },
-      { name: 'Stakeholder Feedback', href: '/sheets?tab=stakeholder', icon: ClipboardList, activeWhenSearch: 'tab=stakeholder' },
+      { name: 'Feedback Summarizer', href: '/sheets', icon: MessageSquare },
+      { name: 'Briefing Assistant', href: '/briefing-assistant', icon: LayoutGrid },
     ],
   },
   {
@@ -49,7 +45,6 @@ const sections: NavSection[] = [
 
 function NavContent() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const router = useRouter()
   const [userEmail, setUserEmail] = useState<string | null>(null)
 
@@ -85,13 +80,9 @@ function NavContent() {
             <ul className="space-y-1">
               {section.items.map((item) => {
                 const Icon = item.icon
-                const isActive = item.activeWhenSearch
-                  ? pathname === '/sheets' && searchParams.get('tab') === 'stakeholder'
-                  : item.activeWhenNotSearch
-                    ? pathname === '/sheets' && searchParams.get('tab') !== 'stakeholder'
-                    : item.href === '/admin'
-                      ? pathname === '/admin'
-                      : pathname.startsWith(item.href.split('?')[0])
+                const isActive = item.href === '/admin'
+                  ? pathname === '/admin'
+                  : pathname.startsWith(item.href.split('?')[0])
                 return (
                   <li key={item.name}>
                     <Link
@@ -134,22 +125,6 @@ function NavContent() {
   )
 }
 
-function NavFallback() {
-  return (
-    <nav className="w-72 border-r bg-card p-5 flex flex-col">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold">Heimdall</h1>
-        <p className="text-sm text-muted-foreground">Admin Panel</p>
-      </div>
-      <div className="flex-1 rounded-md bg-muted/50 animate-pulse" />
-    </nav>
-  )
-}
-
 export function Nav() {
-  return (
-    <Suspense fallback={<NavFallback />}>
-      <NavContent />
-    </Suspense>
-  )
+  return <NavContent />
 }

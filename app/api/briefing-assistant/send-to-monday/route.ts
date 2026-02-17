@@ -3,6 +3,7 @@ import { mondayGraphql } from '@/src/integrations/monday/client'
 import { workingDocToBriefingDTO } from '@/src/domain/briefingAssistant/schema'
 import { WorkingDocStateSchema } from '@/src/domain/briefingAssistant/schema'
 import { createOrQueueFigmaPage, buildIdempotencyKey } from '@/src/orchestration/createOrQueueFigmaPage'
+import { recordIntegrationCall } from '@/src/services/integrationTelemetry'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,19 +41,24 @@ function buildBriefingDocMarkdown(sections: {
 
 /**
  * POST /api/briefing-assistant/send-to-monday
- * Body: WorkingDocState (+ optional monday_item_id if attaching to existing item).
+ * Body: WorkingDocState (+ optional board_id, monday_item_id).
+ * board_id: per-assignment target board; falls back to env MONDAY_BRIEFING_BOARD_ID.
  * Creates Monday item if needed, creates briefing doc, queues Figma sync.
  */
 export async function POST(req: NextRequest) {
-  if (!BOARD_ID) {
-    return NextResponse.json(
-      { error: 'MONDAY_BRIEFING_BOARD_ID or MONDAY_BOARD_ID not configured' },
-      { status: 500 }
-    )
-  }
+  const routeStart = Date.now()
 
   try {
     const body = await req.json()
+    const boardIdFromBody = (body as { board_id?: string }).board_id?.trim()
+    const boardId = boardIdFromBody || BOARD_ID
+    if (!boardId) {
+      return NextResponse.json(
+        { error: 'board_id required in body or set MONDAY_BRIEFING_BOARD_ID' },
+        { status: 500 }
+      )
+    }
+
     const parsed = WorkingDocStateSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json(
@@ -79,7 +85,7 @@ export async function POST(req: NextRequest) {
               groups { id }
             }
           }`,
-          { boardId: BOARD_ID }
+          { boardId }
         )
         targetGroupId = boardsData?.boards?.[0]?.groups?.[0]?.id ?? null
       }
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
             id
           }
         }`,
-        { boardId: BOARD_ID, groupId: targetGroupId, itemName: state.experimentName }
+        { boardId, groupId: targetGroupId, itemName: state.experimentName }
       )
       const newId = createItem?.create_item?.id
       if (!newId) {
@@ -122,7 +128,7 @@ export async function POST(req: NextRequest) {
           }
         }`,
         {
-          boardId: BOARD_ID,
+          boardId,
           itemId,
           columnId: DOC_COLUMN_ID,
           title: state.experimentName,
@@ -138,9 +144,20 @@ export async function POST(req: NextRequest) {
     }
 
     const briefing = workingDocToBriefingDTO({ ...state, mondayItemId: itemId }, itemId)
+    const idempotencyKey = buildIdempotencyKey(itemId)
     const result = await createOrQueueFigmaPage(briefing, {
-      mondayBoardId: BOARD_ID,
-      idempotencyKey: buildIdempotencyKey(itemId),
+      mondayBoardId: boardId,
+      idempotencyKey,
+    })
+
+    recordIntegrationCall({
+      tool: 'briefing',
+      provider: 'monday',
+      operation: 'send_to_monday',
+      durationMs: Date.now() - routeStart,
+      outcome: result.outcome === 'failed' ? 'error' : 'ok',
+      idempotencyKey,
+      resourceId: itemId,
     })
 
     return NextResponse.json({
