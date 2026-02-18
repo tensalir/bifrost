@@ -1,23 +1,44 @@
 /**
  * Meta (ads/creative) evidence adapter.
- * Normalizes Meta API or export data to EvidenceSnippet for angle generation.
+ * Uses Supabase RAG when configured; otherwise static fallback for continuity.
  */
 
 import type { EvidenceSourceAdapter } from './types.js'
 import type { EvidenceSnippet } from '../angleContext.js'
 import type { EvidenceFilter } from './types.js'
+import { matchEvidenceChunks, isEvidenceRetrievalAvailable } from '@/lib/evidenceClient'
 
 const SOURCE_ID = 'meta_ad_comment'
+const CANONICAL_DATASOURCE_ID = 'ad_performance'
 
-/** Adapter for Meta ad comments / creative feedback. Stub until Meta API is wired. */
+/** Adapter for Meta ad performance / creative feedback. Live when evidence RAG is configured. */
 export const metaAdapter: EvidenceSourceAdapter = {
   sourceId: SOURCE_ID,
 
   async getEvidence(filter: EvidenceFilter): Promise<EvidenceSnippet[]> {
     const limit = filter.limit ?? 20
-    // Stub: no Meta API in repo yet. Return empty or static samples for continuity.
-    const staticSamples = getStaticMetaSamples(filter.productOrUseCase)
-    return staticSamples.slice(0, limit)
+    const productOrUseCase = filter.productOrUseCase?.trim()
+    const since = filter.since ?? undefined
+
+    if (isEvidenceRetrievalAvailable()) {
+      const query = [productOrUseCase, 'ad performance', 'creative', 'metrics'].filter(Boolean).join(' ')
+      const rows = await matchEvidenceChunks({
+        query,
+        matchCount: limit,
+        datasourceId: CANONICAL_DATASOURCE_ID,
+        productOrUseCase: productOrUseCase || undefined,
+        since: since || undefined,
+      })
+      return rows.map((r) => ({
+        id: r.id,
+        text: r.content,
+        source: SOURCE_ID,
+        recency: r.recency ?? new Date().toISOString().slice(0, 10),
+        provenance: r.source_row_id ? `Evidence row ${r.source_row_id}` : undefined,
+        tags: r.product_or_use_case ? [r.product_or_use_case] : undefined,
+      }))
+    }
+    return getStaticMetaSamples(productOrUseCase).slice(0, limit)
   },
 }
 

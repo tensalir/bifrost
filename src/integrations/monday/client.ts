@@ -43,8 +43,12 @@ function getMondayToken(): string | null {
   return process.env.MONDAY_API_TOKEN ?? null
 }
 
+const MONDAY_RETRY_ATTEMPTS = 3
+const MONDAY_RETRY_BASE_MS = 2000
+
 /**
  * Run GraphQL query. Returns null if token missing.
+ * Retries with backoff on 429 (rate limit).
  */
 export async function mondayGraphql<T = unknown>(
   query: string,
@@ -52,19 +56,35 @@ export async function mondayGraphql<T = unknown>(
 ): Promise<T | null> {
   const token = getMondayToken()
   if (!token) return null
-  const res = await fetch(MONDAY_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: token,
-      'API-Version': '2025-04',
-    },
-    body: JSON.stringify({ query, variables }),
-  })
-  if (!res.ok) throw new Error(`Monday API error: ${res.status} ${res.statusText}`)
-  const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> }
-  if (json.errors?.length) throw new Error(`Monday API: ${json.errors.map((e) => e.message).join('; ')}`)
-  return json.data ?? null
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= MONDAY_RETRY_ATTEMPTS; attempt++) {
+    const res = await fetch(MONDAY_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: token,
+        'API-Version': '2025-04',
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+    if (res.status === 429 && attempt < MONDAY_RETRY_ATTEMPTS) {
+      const retryAfter = res.headers.get('Retry-After')
+      const waitMs = retryAfter ? Math.min(Number(retryAfter) * 1000, 30000) : MONDAY_RETRY_BASE_MS * attempt
+      await new Promise((r) => setTimeout(r, waitMs))
+      continue
+    }
+    if (!res.ok) {
+      lastError = new Error(`Monday API error: ${res.status} ${res.statusText}`)
+      throw lastError
+    }
+    const json = (await res.json()) as { data?: T; errors?: Array<{ message: string }> }
+    if (json.errors?.length) {
+      lastError = new Error(`Monday API: ${json.errors.map((e) => e.message).join('; ')}`)
+      throw lastError
+    }
+    return json.data ?? null
+  }
+  throw lastError ?? new Error('Monday API: rate limited')
 }
 
 /** Column map: title lowercase, spaces -> underscores */

@@ -80,9 +80,14 @@ function parseVariants(col: Record<string, string | number | null>): VariantBloc
   return blocks
 }
 
-/** Convert MondayImageAttachment to BriefingImage (drop assetId). */
+/** Convert MondayImageAttachment to BriefingImage (include assetId when present). */
 function toBriefingImages(attachments: MondayImageAttachment[]): BriefingImage[] {
-  return attachments.map((a) => ({ url: a.url, name: a.name, source: a.source }))
+  return attachments.map((a) => ({
+    url: a.url,
+    name: a.name,
+    source: a.source,
+    ...(a.assetId && { assetId: a.assetId }),
+  }))
 }
 
 /**

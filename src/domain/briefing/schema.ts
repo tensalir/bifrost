@@ -9,6 +9,8 @@ export interface BriefingImage {
   name: string
   /** Where it came from: column title, 'doc', 'asset' */
   source: string
+  /** Monday asset ID for fresh-URL resolution when url is stale */
+  assetId?: string
 }
 
 export interface BriefingDTO {

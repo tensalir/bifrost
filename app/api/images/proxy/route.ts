@@ -89,43 +89,53 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const imageUrl = searchParams.get('url')
-
-    if (!imageUrl) {
-      return NextResponse.json(
-        { error: 'Missing "url" query parameter' },
-        { status: 400, headers: CORS_HEADERS }
-      )
-    }
-
-    if (!isAllowedUrl(imageUrl)) {
-      return NextResponse.json(
-        { error: 'URL not allowed — only Monday.com image URLs are supported' },
-        { status: 403, headers: CORS_HEADERS }
-      )
-    }
+    const assetIdParam = searchParams.get('assetId')
 
     const mondayToken = process.env.MONDAY_API_TOKEN
-    let fetchUrl = imageUrl
+    let fetchUrl: string | null = null
 
-    // For protected_static URLs, resolve to a public S3 URL via Monday assets API
-    if (imageUrl.includes('/protected_static/') && mondayToken) {
-      const resourceId = extractResourceId(imageUrl)
-      if (resourceId) {
-        const publicUrl = await resolvePublicUrl(resourceId, mondayToken)
-        if (publicUrl) {
-          fetchUrl = publicUrl
+    if (assetIdParam && mondayToken) {
+      const publicUrl = await resolvePublicUrl(assetIdParam.trim(), mondayToken)
+      if (publicUrl) fetchUrl = publicUrl
+      if (!fetchUrl) {
+        return NextResponse.json(
+          { status: 'error', reason: 'asset_resolve_failed', error: 'Could not resolve asset ID to URL' },
+          { status: 404, headers: CORS_HEADERS }
+        )
+      }
+    } else if (imageUrl) {
+      if (!isAllowedUrl(imageUrl)) {
+        return NextResponse.json(
+          { status: 'error', reason: 'url_not_allowed', error: 'URL not allowed — only Monday.com image URLs are supported' },
+          { status: 403, headers: CORS_HEADERS }
+        )
+      }
+      fetchUrl = imageUrl
+      if (fetchUrl.includes('/protected_static/') && mondayToken) {
+        const resourceId = extractResourceId(fetchUrl)
+        if (resourceId) {
+          const publicUrl = await resolvePublicUrl(resourceId, mondayToken)
+          if (publicUrl) fetchUrl = publicUrl
         }
       }
     }
 
-    // Fetch the image (either from resolved public URL or original if already public)
-    const response = await fetch(fetchUrl, {
-      redirect: 'follow',
-    })
+    if (!fetchUrl) {
+      return NextResponse.json(
+        { status: 'error', reason: 'missing_param', error: 'Provide "url" or "assetId" query parameter' },
+        { status: 400, headers: CORS_HEADERS }
+      )
+    }
+
+    const response = await fetch(fetchUrl, { redirect: 'follow' })
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: `Image fetch failed: ${response.status} ${response.statusText}` },
+        {
+          status: 'error',
+          reason: 'fetch_failed',
+          error: `Image fetch failed: ${response.status} ${response.statusText}`,
+        },
         { status: 502, headers: CORS_HEADERS }
       )
     }
@@ -144,7 +154,11 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Proxy fetch failed' },
+      {
+        status: 'error',
+        reason: 'proxy_error',
+        error: error instanceof Error ? error.message : 'Proxy fetch failed',
+      },
       { status: 500, headers: CORS_HEADERS }
     )
   }

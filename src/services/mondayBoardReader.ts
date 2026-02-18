@@ -17,6 +17,7 @@ export interface MondayBoardItemRow {
   column_values: Array<{
     id: string
     title?: string
+    column?: { title: string }
     text?: string
     value?: string
     type?: string
@@ -71,7 +72,7 @@ export async function readMondayBoardItemsWithMeta(
             id
             name
             group { id title }
-            column_values { id title text value type }
+            column_values { id text value type column { title } }
           }
         }
       }
@@ -95,7 +96,7 @@ export async function readMondayBoardItemsWithMeta(
   function enrich(items: MondayBoardItemRow[]) {
     for (const item of items) {
       for (const cv of item.column_values) {
-        cv.title = columnTitleMap.get(cv.id) ?? cv.id
+        cv.title = cv.column?.title ?? columnTitleMap.get(cv.id) ?? cv.id
       }
     }
   }
@@ -115,7 +116,7 @@ export async function readMondayBoardItemsWithMeta(
             id
             name
             group { id title }
-            column_values { id title text value type }
+            column_values { id text value type column { title } }
           }
         }
       }`,

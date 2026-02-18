@@ -1,10 +1,12 @@
 /**
  * Dynamic evidence sources for angle generation.
  * Single retrieval interface: getEvidence(sources, filter) aggregates from selected adapters.
+ * Uses canonical datasource IDs (ad_performance, social_comments, etc.) shared with UI and APIs.
  */
 
 import type { EvidenceSnippet } from '../angleContext.js'
 import type { EvidenceSourceAdapter, EvidenceFilter } from './types.js'
+import type { CanonicalDatasourceId } from '../datasources.js'
 import { metaAdapter } from './metaAdapter.js'
 import { customerInsightsAdapter } from './customerInsightsAdapter.js'
 import { socialCommentsAdapter } from './socialCommentsAdapter.js'
@@ -16,12 +18,12 @@ export { customerInsightsAdapter } from './customerInsightsAdapter.js'
 export { socialCommentsAdapter } from './socialCommentsAdapter.js'
 export { staticAdapter } from './staticAdapter.js'
 
-/** Known adapter IDs for configuration. */
-export const SOURCE_IDS = ['meta_ad_comment', 'customer_insights', 'social_comments', 'static_fallback'] as const
+/** Canonical datasource IDs (re-export for API validation). Same set as in datasources.ts. */
+export { DATASOURCE_IDS as SOURCE_IDS } from '../datasources.js'
 
-const adapterMap: Record<(typeof SOURCE_IDS)[number], EvidenceSourceAdapter> = {
-  meta_ad_comment: metaAdapter,
-  customer_insights: customerInsightsAdapter,
+const adapterMap: Record<CanonicalDatasourceId, EvidenceSourceAdapter> = {
+  ad_performance: metaAdapter,
+  untapped_use_cases: customerInsightsAdapter,
   social_comments: socialCommentsAdapter,
   static_fallback: staticAdapter,
 }
@@ -29,14 +31,15 @@ const adapterMap: Record<(typeof SOURCE_IDS)[number], EvidenceSourceAdapter> = {
 /**
  * Fetch evidence from the given sources and merge into one list.
  * Deduplicates by snippet id; sorts by recency (newest first).
+ * @param sourceIds - Canonical datasource IDs (ad_performance, social_comments, etc.)
  */
 export async function getEvidence(
-  sourceIds: (typeof SOURCE_IDS)[number][] = ['static_fallback'],
+  sourceIds: CanonicalDatasourceId[] = ['static_fallback'],
   filter: EvidenceFilter = {}
 ): Promise<EvidenceSnippet[]> {
   const limit = filter.limit ?? 50
   const adapters = sourceIds
-    .filter((id) => adapterMap[id])
+    .filter((id): id is CanonicalDatasourceId => id in adapterMap)
     .map((id) => adapterMap[id])
   const results = await Promise.all(
     adapters.map((a) => a.getEvidence({ ...filter, limit: Math.ceil(limit / adapters.length) || 10 }))

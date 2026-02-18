@@ -1,9 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { Loader2, MessageSquare, Lightbulb, BarChart3, Sparkles } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Loader2, MessageSquare, Lightbulb, BarChart3, Sparkles, ChevronDown, FileText } from 'lucide-react'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-
+import { UI_DATASOURCE_IDS, DATASOURCE_CONFIG } from '@/src/domain/briefingAssistant/datasources'
 const PRODUCTS = [
   { id: 'quiet', label: 'Quiet' },
   { id: 'engage', label: 'Engage' },
@@ -11,116 +14,111 @@ const PRODUCTS = [
   { id: 'dream', label: 'Dream' },
 ] as const
 
-const DATASOURCES = [
-  { id: 'social media comments', label: 'Social', icon: MessageSquare },
-  { id: 'untapped use cases', label: 'Use cases', icon: Lightbulb },
-  { id: 'ad performance', label: 'Ads', icon: BarChart3 },
-] as const
+const ICON_MAP = { MessageSquare, Lightbulb, BarChart3, FileText } as const
+
+/** Datasource options for the generator (canonical IDs + labels from shared config). */
+const DATASOURCES = UI_DATASOURCE_IDS.map((id) => {
+  const config = DATASOURCE_CONFIG[id]
+  const Icon = ICON_MAP[config.icon]
+  return { id, label: config.label, icon: Icon }
+})
 
 export interface BriefingGeneratorPanelProps {
   onGenerate?: (product: string, datasources: string[]) => void | Promise<void>
+  /** When true, render as trigger button + dropdown instead of inline toggles. */
+  collapsed?: boolean
+  /** Controlled open state when collapsed (parent controls popover). */
+  open?: boolean
+  /** Called when dropdown open state should change (e.g. trigger click or close). */
+  onOpenChange?: (open: boolean) => void
 }
 
-export function BriefingGeneratorPanel({ onGenerate }: BriefingGeneratorPanelProps) {
-  const [product, setProduct] = useState('')
-  const [selectedDatasources, setSelectedDatasources] = useState<string[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-
-  const toggleDatasource = (id: string) => {
-    setSelectedDatasources((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
-    )
-  }
-
+function GeneratorFormContent({
+  product,
+  setProduct,
+  selectedDatasources,
+  setSelectedDatasources,
+  isLoading,
+  onGenerate,
+  onSuccess,
+  vertical,
+}: {
+  product: string
+  setProduct: (v: string) => void
+  selectedDatasources: string[]
+  setSelectedDatasources: (v: string[]) => void
+  isLoading: boolean
+  onGenerate?: (product: string, datasources: string[]) => void | Promise<void>
+  onSuccess?: () => void
+  vertical?: boolean
+}) {
   const handleGenerate = async () => {
     if (!product.trim() || selectedDatasources.length === 0) return
-    setIsLoading(true)
-    try {
-      await onGenerate?.(product, selectedDatasources)
-    } finally {
-      setIsLoading(false)
-    }
+    if (!onGenerate) return
+    const prev = { product, selectedDatasources }
+    await onGenerate(prev.product, prev.selectedDatasources)
+    onSuccess?.()
   }
 
   const canGenerate = product && selectedDatasources.length > 0
 
-  return (
-    <div className="flex items-center gap-3 flex-wrap">
-      {/* Products – compact floating control group */}
-      <div className="rounded-lg border border-border bg-card shadow-sm p-2">
-        <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 px-0.5">
-          Product
-        </span>
-        <div className="flex items-center rounded-md bg-muted/40 p-0.5">
-          {PRODUCTS.map((prod) => {
-            const isSelected = product === prod.id
-            return (
-              <button
-                key={prod.id}
-                type="button"
-                disabled={isLoading}
-                onClick={() => setProduct(isSelected ? '' : prod.id)}
-                aria-pressed={isSelected}
-                aria-label={`Select product: ${prod.label}`}
-                className={cn(
-                  'px-2.5 py-1 rounded text-[11px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                  isSelected
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {prod.label}
-              </button>
-            )
-          })}
+  if (vertical) {
+    return (
+      <div className="flex flex-col gap-4 p-4 min-w-[280px]">
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Product
+          </span>
+          <ToggleGroup
+            type="single"
+            size="sm"
+            value={product || undefined}
+            onValueChange={(v) => setProduct(v ?? '')}
+            disabled={isLoading}
+            className="justify-start flex-wrap"
+          >
+            {PRODUCTS.map((p) => (
+              <ToggleGroupItem key={p.id} value={p.id} aria-label={`Select product: ${p.label}`}>
+                {p.label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
-      </div>
-
-      {/* Data sources – compact floating control group */}
-      <div className="rounded-lg border border-border bg-card shadow-sm p-2">
-        <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 px-0.5">
-          Data sources
-        </span>
-        <div className="flex items-center gap-0.5 flex-wrap">
-          {DATASOURCES.map((ds) => {
-            const Icon = ds.icon
-            const isSelected = selectedDatasources.includes(ds.id)
-            return (
-              <button
-                key={ds.id}
-                type="button"
-                disabled={isLoading}
-                onClick={() => toggleDatasource(ds.id)}
-                aria-pressed={isSelected}
-                aria-label={`Toggle data source: ${ds.label}`}
-                className={cn(
-                  'inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                  isSelected
-                    ? 'bg-primary/10 text-primary border border-primary/20'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30 border border-transparent'
-                )}
-              >
-                <Icon className="h-3 w-3 shrink-0" />
-                {ds.label}
-              </button>
-            )
-          })}
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Sources
+          </span>
+          <ToggleGroup
+            type="multiple"
+            size="sm"
+            variant="outline"
+            value={selectedDatasources}
+            onValueChange={setSelectedDatasources}
+            disabled={isLoading}
+            className="justify-start flex-wrap"
+          >
+            {DATASOURCES.map((ds) => {
+              const Icon = ds.icon
+              return (
+                <ToggleGroupItem
+                  key={ds.id}
+                  value={ds.id}
+                  aria-label={`Toggle data source: ${ds.label}`}
+                  className="gap-1"
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  {ds.label}
+                </ToggleGroupItem>
+              )
+            })}
+          </ToggleGroup>
         </div>
-      </div>
-
-      {/* Generate CTA */}
-      <div className="flex items-end">
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={handleGenerate}
-          disabled={isLoading || !canGenerate}
+          disabled={!canGenerate || isLoading}
           aria-label="Generate angles"
-          className={cn(
-            'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-            canGenerate
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm'
-              : 'bg-muted/50 text-muted-foreground/60 cursor-not-allowed'
-          )}
+          className="w-full"
         >
           {isLoading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
@@ -128,8 +126,157 @@ export function BriefingGeneratorPanel({ onGenerate }: BriefingGeneratorPanelPro
             <Sparkles className="h-3.5 w-3.5 shrink-0" />
           )}
           Generate
-        </button>
+        </Button>
       </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+          Product
+        </span>
+        <ToggleGroup
+          type="single"
+          size="sm"
+          value={product || undefined}
+          onValueChange={(v) => setProduct(v ?? '')}
+          disabled={isLoading}
+          className="justify-start"
+        >
+          {PRODUCTS.map((p) => (
+            <ToggleGroupItem key={p.id} value={p.id} aria-label={`Select product: ${p.label}`}>
+              {p.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </div>
+      <Separator orientation="vertical" className="h-5" />
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+          Sources
+        </span>
+        <ToggleGroup
+          type="multiple"
+          size="sm"
+          variant="outline"
+          value={selectedDatasources}
+          onValueChange={setSelectedDatasources}
+          disabled={isLoading}
+          className="justify-start"
+        >
+          {DATASOURCES.map((ds) => {
+            const Icon = ds.icon
+            return (
+              <ToggleGroupItem
+                key={ds.id}
+                value={ds.id}
+                aria-label={`Toggle data source: ${ds.label}`}
+                className="gap-1"
+              >
+                <Icon className="h-3 w-3 shrink-0" />
+                {ds.label}
+              </ToggleGroupItem>
+            )
+          })}
+        </ToggleGroup>
+      </div>
+      <Separator orientation="vertical" className="h-5" />
+      <Button
+        size="sm"
+        onClick={handleGenerate}
+        disabled={!canGenerate || isLoading}
+        aria-label="Generate angles"
+      >
+        {isLoading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+        ) : (
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+        )}
+        Generate
+      </Button>
     </div>
+  )
+}
+
+export function BriefingGeneratorPanel({
+  onGenerate,
+  collapsed = false,
+  open = false,
+  onOpenChange,
+}: BriefingGeneratorPanelProps) {
+  const [product, setProduct] = useState('')
+  const [selectedDatasources, setSelectedDatasources] = useState<string[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleGenerateCall = async (p: string, ds: string[]) => {
+    setIsLoading(true)
+    try {
+      await onGenerate?.(p, ds)
+      onOpenChange?.(false)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!open && collapsed) {
+      setProduct('')
+      setSelectedDatasources([])
+    }
+  }, [open, collapsed])
+
+  if (collapsed) {
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => onOpenChange?.(!open)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md text-sm font-medium transition-colors bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 min-h-[40px]"
+        >
+          <Sparkles className="h-4 w-4" />
+          Generate
+          <ChevronDown className={cn('h-4 w-4 transition-transform', open && 'rotate-180')} />
+        </button>
+        {open && (
+          <div
+            className="absolute top-full left-0 mt-2 z-50 rounded-lg border border-border bg-card shadow-lg animate-in zoom-in-95 fade-in-0 duration-150"
+            role="dialog"
+            aria-label="Generate angles"
+          >
+            <GeneratorFormContent
+              product={product}
+              setProduct={setProduct}
+              selectedDatasources={selectedDatasources}
+              setSelectedDatasources={setSelectedDatasources}
+              isLoading={isLoading}
+              onGenerate={handleGenerateCall}
+              onSuccess={() => onOpenChange?.(false)}
+              vertical
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <GeneratorFormContent
+      product={product}
+      setProduct={setProduct}
+      selectedDatasources={selectedDatasources}
+      setSelectedDatasources={setSelectedDatasources}
+      isLoading={isLoading}
+      onGenerate={async (p, ds) => {
+        setIsLoading(true)
+        try {
+          await onGenerate?.(p, ds)
+        } finally {
+          setIsLoading(false)
+        }
+      }}
+      vertical={false}
+    />
   )
 }

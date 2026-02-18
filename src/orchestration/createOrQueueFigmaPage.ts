@@ -53,7 +53,7 @@ export async function createOrQueueFigmaPage(
     statusTransitionId?: string
     nodeMapping?: Array<{ nodeName: string; value: string }>
     frameRenames?: Array<{ oldName: string; newName: string }>
-    images?: Array<{ url: string; name: string; source: string }>
+    images?: Array<{ url: string; name: string; source: string; assetId?: string }>
   }
 ): Promise<CreateOrQueueResult> {
   const idempotencyKey = options.idempotencyKey ?? buildIdempotencyKey(briefing.mondayItemId, options.statusTransitionId)
@@ -112,12 +112,13 @@ export async function createOrQueueFigmaPage(
     }
   }
 
-  // Merge images from briefing DTO and explicit options (dedup by URL)
+  // Merge images from briefing DTO and explicit options (dedup by URL or assetId)
   const allImages = [...(briefing.images ?? []), ...(options.images ?? [])]
-  const seenUrls = new Set<string>()
+  const seenKeys = new Set<string>()
   const dedupImages = allImages.filter((img) => {
-    if (seenUrls.has(img.url)) return false
-    seenUrls.add(img.url)
+    const key = (img.url || img.assetId || '').trim()
+    if (key && seenKeys.has(key)) return false
+    if (key) seenKeys.add(key)
     return true
   })
 

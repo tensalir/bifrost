@@ -168,31 +168,37 @@ function deterministicBackfill(
     const product = extractDocSection(mondayDocContent, 'Product')
     const visual = extractDocSection(mondayDocContent, 'Visual')
     const copyInfo = extractDocSection(mondayDocContent, 'Copy info')
+    const note = extractDocSection(mondayDocContent, 'Note')
     const test = extractDocSection(mondayDocContent, 'Test')
     const variantRows = parseVariantTableRows(mondayDocContent)
 
-    // Force-overwrite all doc-sourced fields so verbatim Monday content always wins
-    // over Claude's potentially paraphrased version.
-    upsertMapping(out.textMappings, 'IDEA:', idea ?? undefined, true)
-    upsertMapping(out.textMappings, 'WHY:', why ?? undefined, true)
-    if (audience) {
-      upsertMapping(out.textMappings, 'AUDIENCE/REGION:', `AUDIENCE/REGION:\n${audience}`, true)
+    // Build single "Briefing Content" body (IDEA through Test/Note) for flexible template.
+    const parts: string[] = []
+    if (idea?.trim()) parts.push(`IDEA:\n${idea.trim()}`)
+    if (why?.trim()) parts.push(`WHY:\n${why.trim()}`)
+    if (audience?.trim()) {
+      parts.push(`AUDIENCE/REGION:\n${audience.trim()}`)
       usedDocAudience = true
     }
-    upsertMapping(out.textMappings, 'FORMATS:', formats ?? undefined, true)
-    upsertMapping(out.textMappings, 'Product:', product ?? undefined, true)
-    const visualContent = visual?.replace(/^visual\s*:\s*/i, '').trim() || undefined
-    const copyInfoContent = copyInfo?.replace(/^copy\s+info\s*:\s*/i, '').trim() || undefined
-    upsertMapping(out.textMappings, 'Visual', visualContent, true)
-    upsertMapping(out.textMappings, 'Copy info:', copyInfoContent, true)
-    upsertMapping(out.textMappings, 'Test:', test ?? undefined, true)
-
-    if (variants) {
+    if (formats?.trim()) parts.push(`FORMATS:\n${formats.trim()}`)
+    if (variants?.trim()) {
       const firstLine = variants.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? variants.trim()
-      if (/^\d+$/.test(firstLine)) {
-        upsertMapping(out.textMappings, 'VARIANTS: 4', `VARIANTS: ${firstLine}`)
-      }
+      if (/^\d+$/.test(firstLine)) parts.push(`VARIANTS: ${firstLine}`)
+      else parts.push(`VARIANTS:\n${variants.trim()}`)
     }
+    if (product?.trim()) parts.push(`Product:\n${product.trim()}`)
+    if (visual?.trim()) {
+      const visualContent = visual.replace(/^visual\s*:\s*/i, '').trim()
+      parts.push(`Visual:\n${visualContent}`)
+    }
+    if (copyInfo?.trim()) {
+      const copyInfoContent = copyInfo.replace(/^copy\s+info\s*:\s*/i, '').trim()
+      parts.push(`Copy info:\n${copyInfoContent}`)
+    }
+    if (note?.trim()) parts.push(`Note:\n${note.trim()}`)
+    if (test?.trim()) parts.push(`Test:\n${test.trim()}`)
+    const briefingContent = parts.join('\n\n')
+    if (briefingContent) upsertMapping(out.textMappings, 'Briefing Content', briefingContent, true)
 
     // Variant rows from Monday table -> Briefing column variant blocks.
     // Use Monday column names as sub-headers: "Input visual + copy direction:" and "Script:".
@@ -211,9 +217,15 @@ function deterministicBackfill(
     }
   }
 
-  // Fallback when doc audience is missing.
+  // Fallback when doc audience is missing: add region into Briefing Content.
   if (!usedDocAudience && region) {
-    upsertMapping(out.textMappings, 'AUDIENCE/REGION:', `AUDIENCE/REGION: ${region}`)
+    const existing = out.textMappings.find((m) => m.nodeName === 'Briefing Content')
+    const audienceLine = `AUDIENCE/REGION: ${region}`
+    if (existing?.value) {
+      existing.value = audienceLine + '\n\n' + existing.value
+    } else {
+      out.textMappings.push({ nodeName: 'Briefing Content', value: audienceLine })
+    }
   }
 
   return out
@@ -235,11 +247,16 @@ export function briefingToNodeMapping(dto: BriefingDTO): NodeMappingResult {
   const expName = dto.experimentName
 
   textMappings.push({ nodeName: 'Name EXP', value: expName })
-  if (dto.idea) textMappings.push({ nodeName: 'IDEA:', value: dto.idea })
-  if (dto.audienceRegion)
-    textMappings.push({ nodeName: 'AUDIENCE/REGION:', value: `AUDIENCE/REGION: ${dto.audienceRegion}` })
-  if (dto.segment) textMappings.push({ nodeName: 'SEGMENT: ALL', value: `SEGMENT: ${dto.segment}` })
-  if (dto.formats) textMappings.push({ nodeName: 'FORMATS:', value: dto.formats })
+
+  // Single Briefing Content body for flexible template (column-only fallback).
+  const bodyParts: string[] = []
+  if (dto.idea) bodyParts.push(`IDEA:\n${dto.idea}`)
+  if (dto.audienceRegion) bodyParts.push(`AUDIENCE/REGION: ${dto.audienceRegion}`)
+  if (dto.segment) bodyParts.push(`SEGMENT: ${dto.segment}`)
+  if (dto.formats) bodyParts.push(`FORMATS:\n${dto.formats}`)
+  if (dto.variants.length) bodyParts.push(`VARIANTS: ${dto.variants.length}`)
+  const briefingContent = bodyParts.join('\n\n')
+  if (briefingContent) textMappings.push({ nodeName: 'Briefing Content', value: briefingContent })
 
   for (let i = 0; i < dto.variants.length; i++) {
     const v = dto.variants[i]
@@ -311,6 +328,7 @@ Variant block structure (use these exact sub-headers — they are the Monday col
 - Then "Script: " followed by the verbatim text from the Script column.
 
 Mapping rules:
+- Include one "Briefing Content" entry in textMappings with the FULL pre-variant doc body: concatenate all sections from Idea through Test/Note into a single string with clear labels (e.g. "IDEA:\\n...\\n\\nWHY:\\n..."). This maps to the single Briefing Content text node in Figma.
 - Fill variant rows A/B/C/D from Monday into the Briefing column variant blocks (A - Image, B - Image, etc.) using the structure above. Copy all text WORD FOR WORD.
 - Map Briefing variant type labels (A - Image -> A - Static, etc.) and put the full variant block into those same nodes.
 - Do NOT put this input data into the Copy column Variation frames — those are for final in-design copy only.

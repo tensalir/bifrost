@@ -321,21 +321,36 @@ export async function getDocImages(docId: string): Promise<MondayImageAttachment
       }
       if (!content) continue
 
-      // Try common URL fields in Monday Doc image blocks
+      // Try common URL fields in Monday Doc image blocks; capture assetId when present for fresh-URL resolution
       const url =
         (typeof content.src === 'string' && content.src) ||
         (typeof content.url === 'string' && content.url) ||
         (typeof content.publicUrl === 'string' && content.publicUrl) ||
         (typeof content.public_url === 'string' && content.public_url) ||
         null
-      if (!url) continue
-
+      const assetId =
+        typeof content.assetId === 'string'
+          ? content.assetId
+          : typeof content.asset_id === 'string'
+            ? content.asset_id
+            : typeof content.fileId === 'number'
+              ? String(content.fileId)
+              : typeof content.fileId === 'string'
+                ? content.fileId
+                : undefined
       const name =
         (typeof content.name === 'string' && content.name) ||
         (typeof content.fileName === 'string' && content.fileName) ||
         `doc-image-${block.id}`
 
-      images.push({ url, name, source: 'doc' })
+      if (url || assetId) {
+        images.push({
+          url: url ?? '',
+          name,
+          source: 'doc',
+          ...(assetId && { assetId }),
+        })
+      }
     }
     return images
   } catch {

@@ -22,7 +22,7 @@ export interface PendingSyncJob {
   /** Pre-computed frame renames (e.g. NAME-EXP-4x5 → {experimentName}-A-4x5) */
   frameRenames?: Array<{ oldName: string; newName: string }>
   /** Image attachments from Monday file columns / briefing doc; plugin fetches & imports into Figma */
-  images?: Array<{ url: string; name: string; source: string }>
+  images?: Array<{ url: string; name: string; source: string; assetId?: string }>
   state: PendingSyncJobState
   createdAt: string
   updatedAt: string

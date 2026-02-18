@@ -6,6 +6,7 @@
  * Main thread handles: Figma API (clone page, fill text, reorder).
  * UI handles: fetch from Heimdall backend, user interaction.
  */
+import { runExportComments } from './exportComments'
 
 const TEMPLATE_PAGE_NAMES = ['Briefing Template to Duplicate', 'Briefing Template', 'Template']
 
@@ -27,6 +28,7 @@ interface QueuedJob {
 interface ImageFetchRequest {
   url: string
   name: string
+  assetId?: string
   pageId: string
 }
 
@@ -344,7 +346,8 @@ async function applyNodeMapping(
   node: BaseNode,
   mappingEntries: MappingEntry[],
   frameRenames: Array<{ oldName: string; newName: string }>
-): Promise<void> {
+): Promise<number> {
+  let mappedCount = 0
   if (node.type === 'TEXT') {
     var textNode = node as TextNode
     var path = getAncestorPath(textNode)
@@ -379,9 +382,10 @@ async function applyNodeMapping(
           targetNode.textAutoResize = 'HEIGHT'
         }
         await styleFilledContent(targetNode)
+        mappedCount += 1
       } catch (_) {}
     }
-    return
+    return mappedCount
   }
   if (node.type === 'FRAME' || node.type === 'GROUP') {
     var frame = node as FrameNode
@@ -396,9 +400,10 @@ async function applyNodeMapping(
   var withChildren = node as { children?: readonly BaseNode[] }
   if (withChildren.children && withChildren.children.length) {
     for (var i = 0; i < withChildren.children.length; i++) {
-      await applyNodeMapping(withChildren.children[i], mappingEntries, frameRenames)
+      mappedCount += await applyNodeMapping(withChildren.children[i], mappingEntries, frameRenames)
     }
   }
+  return mappedCount
 }
 
 function findSectionInsertionIndex(sectionName: string, allPages: readonly PageNode[]): number {
@@ -816,72 +821,62 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
 
   const { wrapper: briefingWrapper, body: briefingCol } = makeColumnWithHeader('Briefing', colW, true)
   row.appendChild(briefingWrapper)
-  const briefingBlocks = [
-    { label: 'Name EXP', value: 'EXP-NAME' },
-    { label: 'IDEA:', value: 'IDEA:' },
-    { label: 'WHY:', value: 'WHY:' },
-    { label: 'AUDIENCE/REGION:', value: 'AUDIENCE/REGION:' },
-    { label: 'SEGMENT: ALL', value: 'SEGMENT: ALL' },
-    { label: 'FORMATS:', value: 'FORMATS:' },
-    { label: 'VARIANTS: 4', value: 'VARIANTS: 4' },
-    { label: 'Product:', value: 'Product:' },
-    { label: 'Visual', value: null },
-    { label: 'Copy info:', value: null },
-    { label: 'Note: -', value: 'Note: -' },
-    { label: 'Test: -', value: 'Test: -' },
-    { label: 'VARIANTS', value: 'VARIANTS' },
-  ]
-  const darkHeaderLabels = new Set(['Name EXP', 'VARIANTS'])
-  const tintedLabels = new Set([
+
+  // Name EXP header block (dark)
+  const nameBlock = makeBlockFrame()
+  nameBlock.fills = [solidPaint(0.25, 0.25, 0.27)]
+  const nameText = makeTextNode('Name EXP', 'EXP-NAME', font)
+  nameText.setPluginData('heimdallId', 'heimdall:exp_name')
+  nameText.setPluginData('placeholderId', 'heimdall:exp_name')
+  applyTextColor(nameText, 1, 1, 1)
+  appendAndStretch(nameBlock, nameText)
+  appendAndStretch(briefingCol, nameBlock)
+
+  // Single flexible "Briefing Content" block — full body from Monday doc (IDEA through Testing/Notes)
+  const briefingContentPlaceholder = [
     'IDEA:',
+    'Your core creative idea.',
+    '',
     'WHY:',
+    'Strategic rationale.',
+    '',
     'AUDIENCE/REGION:',
+    'Target audience and region.',
+    '',
     'SEGMENT: ALL',
+    '',
     'FORMATS:',
+    'e.g. Static, Video, Carousel.',
+    '',
     'VARIANTS: 4',
+    '',
     'Product:',
-  ])
-  for (const item of briefingBlocks) {
-    const block = makeBlockFrame()
-    if (item.value === null) {
-      const elements = figma.createFrame()
-      elements.name = 'Elements'
-      elements.layoutMode = 'VERTICAL'
-      elements.primaryAxisSizingMode = 'AUTO'
-      elements.counterAxisSizingMode = 'FIXED'
-      elements.itemSpacing = 6 * S
-      elements.fills = []
-      appendAndStretch(block, elements)
-      const label = makeTextNode(item.label, item.label, font)
-      appendAndStretch(elements, label)
-      const specs = figma.createFrame()
-      specs.name = 'Specs'
-      specs.layoutMode = 'VERTICAL'
-      specs.primaryAxisSizingMode = 'AUTO'
-      specs.counterAxisSizingMode = 'FIXED'
-      specs.fills = []
-      appendAndStretch(elements, specs)
-      const dash = makeTextNode('-', '-', font)
-      appendAndStretch(specs, dash)
-      if (item.label === 'Visual' || item.label === 'Copy info:') {
-        block.fills = [solidPaint(0.96, 0.97, 0.99)]
-      }
-    } else {
-      const tn = makeTextNode(item.label, item.value, font)
-      if (item.label === 'Name EXP') {
-        tn.setPluginData('heimdallId', 'heimdall:exp_name')
-        tn.setPluginData('placeholderId', 'heimdall:exp_name')
-      }
-      if (darkHeaderLabels.has(item.label)) {
-        block.fills = [solidPaint(0.25, 0.25, 0.27)]
-        applyTextColor(tn, 1, 1, 1)
-      } else if (tintedLabels.has(item.label)) {
-        block.fills = [solidPaint(0.96, 0.97, 0.99)]
-      }
-      appendAndStretch(block, tn)
-    }
-    appendAndStretch(briefingCol, block)
-  }
+    'Product context.',
+    '',
+    'Visual:',
+    'Visual direction.',
+    '',
+    'Copy info:',
+    'Copy tone and CTAs.',
+    '',
+    'Note: -',
+    '',
+    'Test: -',
+  ].join('\n')
+  const briefingContentBlock = makeBlockFrame()
+  briefingContentBlock.fills = [solidPaint(0.96, 0.97, 0.99)]
+  const briefingContentText = makeTextNode('Briefing Content', briefingContentPlaceholder, font)
+  appendAndStretch(briefingContentBlock, briefingContentText)
+  appendAndStretch(briefingCol, briefingContentBlock)
+
+  // VARIANTS section header (dark)
+  const variantsHeaderBlock = makeBlockFrame()
+  variantsHeaderBlock.fills = [solidPaint(0.25, 0.25, 0.27)]
+  const variantsHeaderText = makeTextNode('VARIANTS', 'VARIANTS', font)
+  applyTextColor(variantsHeaderText, 1, 1, 1)
+  appendAndStretch(variantsHeaderBlock, variantsHeaderText)
+  appendAndStretch(briefingCol, variantsHeaderBlock)
+
   const variantPlaceholder = (letter: string) =>
     `${letter} - Image\nInput visual + copy direction:\nScript:`
   for (const letter of ['A', 'B', 'C', 'D']) {
@@ -1451,7 +1446,20 @@ function findUploadsBody(page: PageNode): FrameNode | null {
     }
   }
   walk(page)
-  return gallery ?? columnBody
+  const result = gallery ?? columnBody
+  if (!result) {
+    console.warn('findUploadsBody: Uploads Gallery not found on page', page.name)
+  }
+  return result
+}
+
+/** Figma createImage supports PNG, JPEG, GIF only. Validate by magic bytes and skip unsupported. */
+function isSupportedImageFormat(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) return false
+  const png = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+  const gif = bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && (bytes[3] === 0x38 || bytes[3] === 0x39)
+  return png || jpeg || gif
 }
 
 /**
@@ -1463,6 +1471,10 @@ async function placeImageInUploads(
   imageBytes: Uint8Array,
   imageName: string
 ): Promise<boolean> {
+  if (!isSupportedImageFormat(imageBytes)) {
+    console.warn('Skipping unsupported image format (use PNG/JPEG/GIF):', imageName)
+    return false
+  }
   try {
     const image = figma.createImage(imageBytes)
     const rect = figma.createRectangle()
@@ -1495,12 +1507,21 @@ async function placeImageInUploads(
 /**
  * Import images into a page's Uploads column.
  * Called after image bytes are received from the UI iframe.
+ * Caller should ensure page.loadAsync() was called for dynamic pages before this.
  */
 async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Array; name: string }>): Promise<number> {
   const page = figma.getNodeById(pageId)
-  if (!page || page.type !== 'PAGE') return 0
+  if (!page || page.type !== 'PAGE') {
+    console.warn('importImagesToPage: page not found or not a PAGE', pageId)
+    return 0
+  }
 
-  const uploadsBody = findUploadsBody(page as PageNode)
+  let uploadsBody = findUploadsBody(page as PageNode)
+  if (!uploadsBody) {
+    // Retry once after 500ms for dynamic pages that may not have loaded children yet.
+    await new Promise((r) => setTimeout(r, 500))
+    uploadsBody = findUploadsBody(page as PageNode)
+  }
   if (!uploadsBody) {
     console.warn('No Uploads column found in page:', (page as PageNode).name)
     return 0
@@ -1648,6 +1669,7 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
         }
       }
 
+      var usedPlaceholderFallback = false
       if (hasMapping) {
         var mappingEntries: MappingEntry[] = []
         for (var m = 0; m < job.nodeMapping!.length; m++) {
@@ -1659,10 +1681,19 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
             value: val,
           })
         }
-        await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice())
-        // Skip fillTextNodes when mapping covers all content ÔÇö it causes
-        // the plugin to hang on large templates (140+ node re-traversal).
-        // applyNodeMapping already filled every field the mapping provides.
+        var mappedCount = await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice())
+        // Fallback when mapping keys don't match the current template.
+        // This avoids creating empty pages when applyNodeMapping writes nothing.
+        if (mappedCount === 0) {
+          await fillTextNodes(contentRoot, briefing)
+          usedPlaceholderFallback = true
+          debugLog.push({
+            nodeName: '__MAPPING_FALLBACK__',
+            chars: 'Node mapping matched 0 nodes; used placeholder fallback.',
+            path: [],
+            matched: true,
+          })
+        }
       } else {
         await fillTextNodes(contentRoot, briefing)
       }
@@ -1672,7 +1703,7 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       // already handle typography. The 6-phase normalizeLayout re-traverses
       // 140+ nodes (840+ visits total) which exhausts the Figma API after
       // the heavy applyNodeMapping pass and causes the plugin to hang.
-      if (!hasMapping) {
+      if (!hasMapping || usedPlaceholderFallback) {
         var layoutResult = await normalizeLayout(contentRoot)
         debugLog.push({
           nodeName: '__LAYOUT_NORM__',
@@ -1702,6 +1733,9 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
 var uiHtml = '<html><head><style>'
   + 'body{font-family:Inter,sans-serif;padding:12px;margin:0;}'
   + 'h3{margin:0 0 8px 0;font-size:13px;}'
+  + '.tabs{display:flex;gap:8px;margin:0 0 8px 0;}'
+  + '.tab{padding:7px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:11px;}'
+  + '.tab.active{background:#0d99ff;color:#fff;border-color:#0d99ff;}'
   + '.row{display:flex;gap:8px;align-items:center;margin:8px 0;}'
   + '.label{font-size:11px;color:#555;min-width:68px;}'
   + 'input{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;}'
@@ -1711,11 +1745,23 @@ var uiHtml = '<html><head><style>'
   + '.secondary:hover{background:#f6f6f6;}'
   + '#msg{font-size:11px;color:#666;margin-top:8px;min-height:20px;}'
   + '.err{color:#f24822;}'
+  + '.list{list-style:none;padding:0;margin:8px 0;max-height:220px;overflow-y:auto;}'
+  + '.list li{padding:6px 8px;margin:2px 0;background:#f6f6f6;border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center;}'
+  + '.badge{font-size:9px;padding:2px 6px;border-radius:4px;background:#0d99ff;color:#fff;}'
+  + '.badge.synced{background:#0fa958;}'
+  + '.badge.new{background:#888;}'
+  + 'select{padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;min-width:140px;}'
   + '</style></head><body>'
+  + '<div class="tabs"><button class="tab active" id="tab-sync">Sync Briefings</button><button class="tab" id="tab-comments">Export Comments</button></div>'
   + '<h3>Heimdall Sync</h3>'
   + '<div class="row"><span class="label">API base</span><input id="api-base" placeholder="http://localhost:3846" /><button class="secondary" id="save-api">Save</button></div>'
-  + '<p id="msg">Sync queued briefings from Monday into this file.</p>'
-  + '<button id="sync">Sync queued briefings</button>'
+  + '<div id="sync-panel">'
+  + '  <div id="batch-select-wrap" style="display:none;"><span class="label">Batch</span><select id="batch-select"></select><button class="secondary" id="batch-apply">Apply</button></div>'
+  + '  <p id="batch-label" style="margin:4px 0;font-size:12px;font-weight:600;"></p>'
+  + '  <ul id="briefings-list" class="list"></ul>'
+  + '  <p id="msg" style="margin:8px 0;min-height:20px;font-size:11px;color:#666;"></p>'
+  + '  <button id="sync">Sync</button>'
+  + '</div>'
   + '<button id="create-template" style="margin-top:8px;">Create Auto-Layout Template</button>'
   + '<script>'
   + 'parent.postMessage({ pluginMessage: { type: "ui-boot" } }, "*");'
@@ -1729,7 +1775,10 @@ var uiHtml = '<html><head><style>'
   + 'var DEFAULT_HEIMDALL_API = "http://localhost:3846";'
   + 'var HEIMDALL_API = DEFAULT_HEIMDALL_API;'
   + 'var fileKey = "";'
+  + 'var fileName = "";'
   + 'var isSyncing = false;'
+  + 'var currentBriefings = [];'
+  + 'var queuedJobIds = [];'
   + 'function sanitizeApiBase(raw) {'
   + '  var v = (raw || "").trim();'
   + '  if (!v) return DEFAULT_HEIMDALL_API;'
@@ -1744,23 +1793,117 @@ var uiHtml = '<html><head><style>'
   + '  var input = document.getElementById("api-base");'
   + '  setApiBase(input ? input.value : "");'
   + '  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: HEIMDALL_API } }, "*");'
-  + '  var el = document.getElementById("msg");'
-  + '  el.textContent = "Saved API base: " + HEIMDALL_API;'
-  + '  el.className = "";'
-  + '};'
-  + 'document.getElementById("sync").onclick = function() {'
-  + '  if (isSyncing) { document.getElementById("msg").textContent = "Sync already in progress..."; return; }'
-  + '  isSyncing = true;'
-  + '  document.getElementById("msg").textContent = "Fetching queued jobs...";'
+  + '  document.getElementById("msg").textContent = "Saved API base: " + HEIMDALL_API;'
   + '  document.getElementById("msg").className = "";'
-  + '  parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");'
+  + '};'
+  + 'document.getElementById("tab-comments").onclick = function() {'
+  + '  parent.postMessage({ pluginMessage: { type: "open-export-comments" } }, "*");'
   + '};'
   + 'document.getElementById("create-template").onclick = function() {'
   + '  document.getElementById("msg").textContent = "Creating template...";'
   + '  document.getElementById("msg").className = "";'
   + '  parent.postMessage({ pluginMessage: { type: "create-template" } }, "*");'
   + '};'
-  + 'parent.postMessage({ pluginMessage: { type: "ui-handlers-bound", hasSync: !!document.getElementById("sync"), hasCreate: !!document.getElementById("create-template"), hasSave: !!document.getElementById("save-api") } }, "*");'
+  + 'function showBriefings(data) {'
+  + '  currentBriefings = data.items || [];'
+  + '  var listEl = document.getElementById("briefings-list");'
+  + '  listEl.innerHTML = "";'
+  + '  var batchLabel = document.getElementById("batch-label");'
+  + '  batchLabel.textContent = data.batchLabel ? (data.batchLabel + " (" + currentBriefings.length + ")") : "";'
+  + '  for (var i = 0; i < currentBriefings.length; i++) {'
+  + '    var it = currentBriefings[i];'
+  + '    var li = document.createElement("li");'
+  + '    li.textContent = it.name + " | " + (it.batch || "");'
+  + '    var badge = document.createElement("span");'
+  + '    badge.className = "badge " + (it.syncState || "new");'
+  + '    badge.textContent = it.syncState === "synced" ? "Synced" : "New";'
+  + '    li.appendChild(badge);'
+  + '    listEl.appendChild(li);'
+  + '  }'
+  + '  var syncBtn = document.getElementById("sync");'
+  + '  var newCount = currentBriefings.filter(function(it){ return it.syncState !== "synced"; }).length;'
+  + '  syncBtn.textContent = newCount > 0 ? "Sync " + newCount + " briefing(s)" : "Sync all";'
+  + '  syncBtn.disabled = currentBriefings.length === 0;'
+  + '  document.getElementById("msg").textContent = currentBriefings.length === 0 ? "No briefings match this batch and filters." : "";'
+  + '  document.getElementById("msg").className = "";'
+  + '}'
+  + 'function fetchBriefings(selectedBatch) {'
+  + '  document.getElementById("msg").textContent = "Loading briefings...";'
+  + '  document.getElementById("msg").className = "";'
+  + '  var body = { fileName: fileName, fileKey: fileKey };'
+  + '  if (selectedBatch) body.batch = selectedBatch;'
+  + '  fetch(HEIMDALL_API + "/api/plugin/briefings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })'
+  + '    .then(function(r) { return r.json(); })'
+  + '    .then(function(data) {'
+  + '      if (data.needsBatchSelection && data.availableBatches && data.availableBatches.length > 0) {'
+  + '        document.getElementById("batch-select-wrap").style.display = "flex";'
+  + '        document.getElementById("batch-select-wrap").className = "row";'
+  + '        var sel = document.getElementById("batch-select");'
+  + '        sel.innerHTML = "";'
+  + '        var labels = data.batchLabels || data.availableBatches;'
+  + '        for (var i = 0; i < data.availableBatches.length; i++) {'
+  + '          var opt = document.createElement("option");'
+  + '          opt.value = data.availableBatches[i];'
+  + '          opt.textContent = labels[i] || data.availableBatches[i];'
+  + '          sel.appendChild(opt);'
+  + '        }'
+  + '        document.getElementById("batch-label").textContent = "";'
+  + '        document.getElementById("briefings-list").innerHTML = "";'
+  + '        document.getElementById("msg").textContent = "Select a batch to show briefings.";'
+  + '        return;'
+  + '      }'
+  + '      document.getElementById("batch-select-wrap").style.display = "none";'
+  + '      if (data.error) { document.getElementById("msg").textContent = data.error; document.getElementById("msg").className = "err"; return; }'
+  + '      showBriefings(data);'
+  + '    })'
+  + '    .catch(function(e) {'
+  + '      document.getElementById("msg").textContent = "Error: " + e.message;'
+  + '      document.getElementById("msg").className = "err";'
+  + '    });'
+  + '}'
+  + 'document.getElementById("batch-apply").onclick = function() {'
+  + '  var sel = document.getElementById("batch-select");'
+  + '  fetchBriefings(sel && sel.value ? sel.value : null);'
+  + '};'
+  + 'document.getElementById("sync").onclick = function() {'
+  + '  if (isSyncing) return;'
+  + '  if (currentBriefings.length === 0) {'
+  + '    document.getElementById("msg").textContent = "No briefings loaded yet. Wait for load or check API base/filters.";'
+  + '    document.getElementById("msg").className = "err";'
+  + '    return;'
+  + '  }'
+  + '  isSyncing = true;'
+  + '  document.getElementById("msg").textContent = "Queueing briefings...";'
+  + '  document.getElementById("sync").disabled = true;'
+  + '  var items = currentBriefings.map(function(it){ return { id: it.id, name: it.name, batch: it.batch }; });'
+  + '  fetch(HEIMDALL_API + "/api/plugin/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileKey: fileKey || "", items: items }) })'
+  + '    .then(function(r) { return r.json(); })'
+  + '    .then(function(data) {'
+  + '      if (data.error) { document.getElementById("msg").textContent = data.error; document.getElementById("msg").className = "err"; isSyncing = false; document.getElementById("sync").disabled = false; return; }'
+  + '      queuedJobIds = (data.jobs || []).map(function(j){ return j.id; });'
+  + '      document.getElementById("msg").textContent = "Queued " + (data.queued || 0) + ". Fetching jobs...";'
+  + '      var q = "";'
+  + '      if (fileKey) q = "fileKey=" + encodeURIComponent(fileKey);'
+  + '      else if (items.length > 0 && items[0].batch) q = "batch=" + encodeURIComponent(items[0].batch);'
+  + '      return fetch(HEIMDALL_API + "/api/jobs/queued" + (q ? ("?" + q) : "")).then(function(r2){ return r2.json(); });'
+  + '    })'
+  + '    .then(function(data2) {'
+  + '      var jobs = (data2 && data2.jobs) ? data2.jobs : [];'
+  + '      if (queuedJobIds.length > 0) {'
+  + '        jobs = jobs.filter(function(j){ return queuedJobIds.indexOf(j.id) >= 0; });'
+  + '      }'
+  + '      if (jobs.length === 0) { document.getElementById("msg").textContent = "No jobs returned. Try again in a moment."; isSyncing = false; document.getElementById("sync").disabled = false; return; }'
+  + '      document.getElementById("msg").textContent = "Creating " + jobs.length + " page(s)...";'
+  + '      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");'
+  + '    })'
+  + '    .catch(function(e) {'
+  + '      isSyncing = false;'
+  + '      document.getElementById("sync").disabled = false;'
+  + '      document.getElementById("msg").textContent = "Error: " + e.message;'
+  + '      document.getElementById("msg").className = "err";'
+  + '    });'
+  + '};'
+  + 'parent.postMessage({ pluginMessage: { type: "ui-handlers-bound" } }, "*");'
   + 'function fetchJobs(fk) {'
   + '  fileKey = fk;'
   + '  fetch(HEIMDALL_API + "/api/jobs/queued?fileKey=" + encodeURIComponent(fk))'
@@ -1771,8 +1914,8 @@ var uiHtml = '<html><head><style>'
   + '        document.getElementById("msg").textContent = "No file-specific jobs. Checking all queued...";'
   + '        return fetch(HEIMDALL_API + "/api/jobs/queued").then(function(r2){return r2.json();}).then(function(d2){'
   + '          var all = d2.jobs || [];'
-  + '          if (all.length === 0) { document.getElementById("msg").textContent = "No queued jobs."; return; }'
-  + '          document.getElementById("msg").textContent = "Found " + all.length + " job(s) (cross-file). Creating pages...";'
+  + '          if (all.length === 0) { document.getElementById("msg").textContent = "No queued jobs."; isSyncing = false; return; }'
+  + '          document.getElementById("msg").textContent = "Found " + all.length + " job(s). Creating pages...";'
   + '          parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: all } }, "*");'
   + '        });'
   + '      }'
@@ -1800,6 +1943,8 @@ var uiHtml = '<html><head><style>'
   + '  }'
   + '  Promise.all(promises).then(function() {'
   + '    isSyncing = false;'
+  + '    var syncBtn = document.getElementById("sync");'
+  + '    if (syncBtn) syncBtn.disabled = false;'
   + '    var el = document.getElementById("msg");'
   + '    el.textContent = "Done: " + done + " page(s) created." + (failed.length ? " Failed: " + failed.join(", ") : "");'
   + '    el.className = failed.length ? "err" : "";'
@@ -1820,28 +1965,35 @@ var uiHtml = '<html><head><style>'
   + '    }'
   + '    var img = images[i];'
   + '    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;'
-  + '    var fetchUrl = HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url);'
-  + '    fetch(fetchUrl)'
-  + '      .then(function(r) {'
-  + '        if (!r.ok) throw new Error("HTTP " + r.status);'
-  + '        return r.arrayBuffer();'
-  + '      })'
-  + '      .then(function(buf) {'
-  + '        results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });'
-  + '        done++;'
-  + '        next(i + 1);'
-  + '      })'
-  + '      .catch(function(err) {'
-  + '        console.warn("Image fetch failed:", img.url, err);'
-  + '        errors++;'
-  + '        done++;'
-  + '        next(i + 1);'
-  + '      });'
+  + '    var fetchUrl = (img.assetId && !img.url) ? (HEIMDALL_API + "/api/images/proxy?assetId=" + encodeURIComponent(img.assetId)) : (HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url || ""));'
+  + '    function doFetch(attempt) {'
+  + '      fetch(fetchUrl)'
+  + '        .then(function(r) {'
+  + '          if (!r.ok) throw new Error("HTTP " + r.status);'
+  + '          return r.arrayBuffer();'
+  + '        })'
+  + '        .then(function(buf) {'
+  + '          results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });'
+  + '          done++;'
+  + '          next(i + 1);'
+  + '        })'
+  + '        .catch(function(err) {'
+  + '          if (attempt < 2) { setTimeout(function() { doFetch(attempt + 1); }, 500); }'
+  + '          else { console.warn("Image fetch failed:", img.url || img.assetId, err); errors++; done++; next(i + 1); }'
+  + '        });'
+  + '    }'
+  + '    doFetch(1);'
   + '  }'
   + '  next(0);'
   + '}'
   + 'onmessage = function(e) {'
   + '  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;'
+  + '  if (d.type === "context") {'
+  + '    fileKey = d.fileKey || "";'
+  + '    fileName = d.fileName || "";'
+  + '    fetchBriefings(null);'
+  + '    if (!fileKey) document.getElementById("msg").textContent = "File key unavailable in this context. Continuing with batch-based sync.";'
+  + '  }'
   + '  if (d.type === "file-key") {'
   + '    fetchJobs(d.fileKey);'
   + '  }'
@@ -1892,7 +2044,16 @@ export function runSyncBriefings() {
     hasCreate?: boolean;
     hasSave?: boolean;
   }) {
+    if (msg.type === 'open-export-comments') {
+      runExportComments()
+      return
+    }
     if (msg.type === 'ui-boot') {
+      figma.ui.postMessage({
+        type: 'context',
+        fileName: figma.root.name,
+        fileKey: figma.fileKey || '',
+      })
     }
     if (msg.type === 'ui-handlers-bound') {
     }
@@ -1967,11 +2128,14 @@ export function runSyncBriefings() {
             url: job.images[ii].url,
             name: job.images[ii].name,
             pageId: matchResult.pageId,
+            assetId: (job.images[ii] as { assetId?: string }).assetId,
           })
         }
       }
       if (imageRequests.length > 0) {
-        figma.ui.postMessage({ type: 'fetch-images', images: imageRequests })
+        setTimeout(function () {
+          figma.ui.postMessage({ type: 'fetch-images', images: imageRequests })
+        }, 200)
       }
     }
 
@@ -1989,7 +2153,12 @@ export function runSyncBriefings() {
       }
       var pageIds = Object.keys(byPage)
       for (var pi = 0; pi < pageIds.length; pi++) {
-        var placed = await importImagesToPage(pageIds[pi], byPage[pageIds[pi]])
+        var pageId = pageIds[pi]
+        var page = figma.getNodeById(pageId)
+        if (page && page.type === 'PAGE' && typeof (page as any).loadAsync === 'function') {
+          await (page as any).loadAsync()
+        }
+        var placed = await importImagesToPage(pageId, byPage[pageId])
         totalPlaced += placed
       }
       figma.ui.postMessage({

@@ -1,5 +1,302 @@
 "use strict";
 (() => {
+  // src/commands/exportComments.ts
+  var commentsUiHtml = `<html><head><style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Inter,-apple-system,system-ui,sans-serif;background:#1e1e1e;color:#e0e0e0;overflow:hidden;height:100vh;display:flex;flex-direction:column;}
+.header{padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #333;flex-shrink:0;}
+.header .logo{font-size:13px;font-weight:700;letter-spacing:1.5px;color:#fff;text-transform:uppercase;}
+.header .logo span{opacity:0.4;font-weight:400;margin-left:4px;font-size:10px;letter-spacing:0;}
+.toolbar{padding:10px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #2a2a2a;flex-shrink:0;}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;border-radius:5px;font-size:10px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;}
+.btn:disabled{opacity:0.35;cursor:not-allowed;}
+.btn-primary{background:#3b82f6;color:#fff;}
+.btn-primary:hover:not(:disabled){background:#2563eb;}
+.btn-outline{background:transparent;border:1px solid #444;color:#ccc;}
+.btn-outline:hover:not(:disabled){border-color:#666;background:rgba(255,255,255,0.05);}
+.btn-sm{padding:4px 8px;font-size:9px;}
+.filter-row{display:flex;gap:6px;align-items:center;}
+.filter-label{font-size:9px;color:#666;}
+.filter-select{padding:3px 6px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:4px;color:#ddd;font-size:9px;font-family:inherit;outline:none;}
+.stats{font-size:9px;color:#666;margin-left:auto;white-space:nowrap;}
+.content{flex:1;overflow-y:auto;padding:0;}
+.status-bar{padding:8px 16px;font-size:10px;color:#888;min-height:20px;line-height:1.4;flex-shrink:0;}
+.status-bar.err{color:#f24822;}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:24px;text-align:center;color:#666;}
+.empty-icon{font-size:28px;margin-bottom:8px;opacity:0.4;}
+.empty-title{font-size:12px;font-weight:600;margin-bottom:4px;color:#888;}
+.empty-desc{font-size:10px;line-height:1.4;max-width:260px;}
+.comment-list{padding:0;}
+.comment-item{padding:10px 16px;border-bottom:1px solid #2a2a2a;transition:background 0.1s;}
+.comment-item:hover{background:rgba(255,255,255,0.02);}
+.comment-item.reply{padding-left:32px;border-left:2px solid #333;margin-left:16px;}
+.comment-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.comment-author{font-size:10px;font-weight:600;color:#ddd;}
+.comment-time{font-size:9px;color:#555;}
+.comment-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:500;margin-left:4px;}
+.badge-open{background:rgba(59,130,246,0.15);color:#60a5fa;}
+.badge-resolved{background:rgba(34,197,94,0.12);color:#4ade80;}
+.comment-order{font-size:9px;color:#555;font-weight:500;}
+.comment-text{font-size:10px;line-height:1.5;color:#bbb;word-break:break-word;white-space:pre-wrap;}
+.comment-node{font-size:8px;color:#555;margin-top:3px;}
+.footer{flex-shrink:0;padding:8px 16px;border-top:1px solid #333;display:flex;align-items:center;gap:6px;}
+.field-label{font-size:10px;color:#666;min-width:50px;flex-shrink:0;}
+.field-input{flex:1;padding:6px 8px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#ddd;font-size:10px;font-family:inherit;outline:none;transition:border-color 0.15s;}
+.field-input:focus{border-color:#555;}
+</style></head><body>
+
+<div class="header">
+  <div class="logo">Heimdall <span>Comments</span></div>
+</div>
+
+<div class="toolbar">
+  <button class="btn btn-primary" id="fetch-btn">Load Comments</button>
+  <div class="filter-row">
+    <span class="filter-label">Show:</span>
+    <select class="filter-select" id="status-filter">
+      <option value="all">All</option>
+      <option value="open">Open</option>
+      <option value="resolved">Resolved</option>
+    </select>
+  </div>
+  <span class="stats" id="stats"></span>
+  <button class="btn btn-outline btn-sm" id="copy-btn" disabled>Copy CSV</button>
+  <button class="btn btn-outline btn-sm" id="download-btn" disabled>Download</button>
+  <button class="btn btn-outline btn-sm" id="open-sheet-btn" disabled style="border-color:#555;color:#adf7b6;">Open Sheet</button>
+</div>
+
+<div class="content" id="content">
+  <div class="empty">
+    <div class="empty-icon">&#128172;</div>
+    <div class="empty-title">No comments loaded</div>
+    <div class="empty-desc">Click "Load Comments" to fetch all comments from this Figma file via the Heimdall backend.</div>
+  </div>
+</div>
+
+<div id="status" class="status-bar">Ready.</div>
+
+<div class="footer">
+  <span class="field-label">API</span>
+  <input id="api-base" class="field-input" placeholder="http://localhost:3846" style="font-size:9px;" />
+  <button class="btn btn-outline btn-sm" id="save-api">Save</button>
+</div>
+
+<script>
+parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");
+parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");
+
+var DEFAULT_HEIMDALL_API = "http://localhost:3846";
+var HEIMDALL_API = DEFAULT_HEIMDALL_API;
+var fileKey = "";
+var allComments = [];
+var loading = false;
+
+function setStatus(text, isErr) {
+  var el = document.getElementById("status");
+  el.textContent = text;
+  el.className = isErr ? "status-bar err" : "status-bar";
+}
+
+function sanitizeApiBase(raw) {
+  var v = (raw || "").trim();
+  if (!v) return DEFAULT_HEIMDALL_API;
+  return v.replace(/\\/$/, "");
+}
+function setApiBase(raw) {
+  HEIMDALL_API = sanitizeApiBase(raw);
+  var input = document.getElementById("api-base");
+  if (input) input.value = HEIMDALL_API;
+}
+
+document.getElementById("save-api").onclick = function() {
+  var input = document.getElementById("api-base");
+  setApiBase(input ? input.value : "");
+  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: HEIMDALL_API } }, "*");
+};
+
+document.getElementById("fetch-btn").onclick = function() {
+  if (loading) return;
+  if (!fileKey) {
+    parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");
+    setStatus("Requesting file key...", false);
+    setTimeout(function() {
+      if (fileKey) fetchComments();
+      else setStatus("Could not get file key. Save your file first.", true);
+    }, 500);
+    return;
+  }
+  fetchComments();
+};
+
+function fetchComments() {
+  if (!fileKey) { setStatus("No file key available.", true); return; }
+  loading = true;
+  setStatus("Fetching comments for " + fileKey + "...", false);
+  document.getElementById("fetch-btn").disabled = true;
+  var url = HEIMDALL_API + "/api/comments?fileKey=" + encodeURIComponent(fileKey);
+  fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function(data) {
+      loading = false;
+      document.getElementById("fetch-btn").disabled = false;
+      allComments = data.comments || [];
+      setStatus("Loaded " + allComments.length + " comment(s). " +
+        (data.open || 0) + " open, " + (data.resolved || 0) + " resolved.", false);
+      document.getElementById("copy-btn").disabled = allComments.length === 0;
+      document.getElementById("download-btn").disabled = allComments.length === 0;
+      renderComments();
+    })
+    .catch(function(e) {
+      loading = false;
+      document.getElementById("fetch-btn").disabled = false;
+      setStatus("Error: " + e.message, true);
+    });
+}
+
+function renderComments() {
+  var filter = document.getElementById("status-filter").value;
+  var filtered = allComments;
+  if (filter === "open") filtered = allComments.filter(function(c){ return c.status === "open"; });
+  if (filter === "resolved") filtered = allComments.filter(function(c){ return c.status === "resolved"; });
+
+  var topLevel = filtered.filter(function(c){ return c.threadDepth === 0; }).length;
+  var replies = filtered.filter(function(c){ return c.threadDepth > 0; }).length;
+  document.getElementById("stats").textContent = filtered.length + " shown (" + topLevel + " threads, " + replies + " replies)";
+
+  var el = document.getElementById("content");
+  if (filtered.length === 0) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">&#128172;</div><div class="empty-title">No comments match</div><div class="empty-desc">Try changing the filter or load comments first.</div></div>';
+    return;
+  }
+
+  var html = '<div class="comment-list">';
+  for (var i = 0; i < filtered.length; i++) {
+    var c = filtered[i];
+    var isReply = c.threadDepth > 0;
+    var badge = c.status === "resolved"
+      ? '<span class="comment-badge badge-resolved">Resolved</span>'
+      : '<span class="comment-badge badge-open">Open</span>';
+    var orderStr = c.orderNumber ? '<span class="comment-order">#' + c.orderNumber + '</span> ' : '';
+    var time = c.createdAt ? new Date(c.createdAt).toLocaleString() : "";
+    var resolvedTime = c.resolvedAt ? " (resolved " + new Date(c.resolvedAt).toLocaleString() + ")" : "";
+    var nodeInfo = c.nodeId ? '<div class="comment-node">Node: ' + c.nodeId + '</div>' : '';
+    var replyInfo = !isReply && c.replyCount > 0 ? ' &middot; ' + c.replyCount + ' repl' + (c.replyCount === 1 ? 'y' : 'ies') : '';
+
+    html += '<div class="comment-item' + (isReply ? ' reply' : '') + '">'
+      + '<div class="comment-meta">' + orderStr
+      + '<span class="comment-author">' + escHtml(c.author) + '</span>'
+      + '<span class="comment-time">' + time + resolvedTime + replyInfo + '</span>'
+      + (isReply ? '' : badge)
+      + '</div>'
+      + '<div class="comment-text">' + escHtml(c.message) + '</div>'
+      + nodeInfo
+      + '</div>';
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function escHtml(s) {
+  if (!s) return "";
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+document.getElementById("status-filter").onchange = renderComments;
+
+document.getElementById("copy-btn").onclick = function() {
+  var csv = commentsToCsv();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(csv).then(function() {
+      setStatus("Copied " + allComments.length + " comment(s) to clipboard as CSV.", false);
+    });
+  } else {
+    var ta = document.createElement("textarea");
+    ta.value = csv;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    setStatus("Copied " + allComments.length + " comment(s) to clipboard as CSV.", false);
+  }
+};
+
+document.getElementById("download-btn").onclick = function() {
+  if (!fileKey) return;
+  var url = HEIMDALL_API + "/api/comments?fileKey=" + encodeURIComponent(fileKey) + "&format=csv";
+  window.open(url, "_blank");
+  setStatus("Download started.", false);
+};
+
+document.getElementById("open-sheet-btn").onclick = function() {
+  if (!fileKey) return;
+  var url = HEIMDALL_API + "/comments/" + encodeURIComponent(fileKey);
+  window.open(url, "_blank");
+  setStatus("Opening comment sheet in browser...", false);
+};
+
+function commentsToCsv() {
+  var headers = ["#","Author","Message","Created","Resolved","Status","Depth","Replies","Node ID"];
+  var rows = [headers.join(",")];
+  for (var i = 0; i < allComments.length; i++) {
+    var c = allComments[i];
+    rows.push([
+      c.orderNumber || "",
+      csvEsc(c.author),
+      csvEsc(c.message),
+      c.createdAt || "",
+      c.resolvedAt || "",
+      c.status,
+      c.threadDepth,
+      c.replyCount,
+      c.nodeId || ""
+    ].join(","));
+  }
+  return rows.join("\\n");
+}
+
+function csvEsc(val) {
+  if (!val) return "";
+  val = String(val);
+  if (val.indexOf(",") >= 0 || val.indexOf('"') >= 0 || val.indexOf("\\n") >= 0) {
+    return '"' + val.replace(/"/g, '""') + '"';
+  }
+  return val;
+}
+
+onmessage = function(e) {
+  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;
+  if (d.type === "file-key") {
+    fileKey = d.fileKey || "";
+    if (fileKey) document.getElementById("open-sheet-btn").disabled = false;
+  }
+  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_HEIMDALL_API);
+};
+parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");
+<\/script></body></html>`;
+  function runExportComments() {
+    figma.showUI(commentsUiHtml, { width: 520, height: 600 });
+    figma.ui.onmessage = async function(msg) {
+      var _a;
+      if (msg.type === "get-api-base") {
+        const saved = await figma.clientStorage.getAsync("heimdallApiBase");
+        const apiBase = typeof saved === "string" && saved.trim() ? saved.trim() : "http://localhost:3846";
+        figma.ui.postMessage({ type: "api-base", apiBase });
+      }
+      if (msg.type === "save-api-base") {
+        const raw = (_a = msg.apiBase) != null ? _a : "";
+        const apiBase = raw.trim().replace(/\/$/, "") || "http://localhost:3846";
+        await figma.clientStorage.setAsync("heimdallApiBase", apiBase);
+        figma.ui.postMessage({ type: "api-base", apiBase });
+      }
+      if (msg.type === "get-file-key") {
+        figma.ui.postMessage({ type: "file-key", fileKey: figma.fileKey || "" });
+      }
+    };
+  }
+
   // src/commands/syncBriefings.ts
   var TEMPLATE_PAGE_NAMES = ["Briefing Template to Duplicate", "Briefing Template", "Template"];
   function getPlaceholderValue(placeholderId, briefing) {
@@ -238,6 +535,7 @@
     return void 0;
   }
   async function applyNodeMapping(node, mappingEntries, frameRenames) {
+    let mappedCount = 0;
     if (node.type === "TEXT") {
       var textNode = node;
       var path = getAncestorPath(textNode);
@@ -265,10 +563,11 @@
             targetNode.textAutoResize = "HEIGHT";
           }
           await styleFilledContent(targetNode);
+          mappedCount += 1;
         } catch (_) {
         }
       }
-      return;
+      return mappedCount;
     }
     if (node.type === "FRAME" || node.type === "GROUP") {
       var frame = node;
@@ -283,9 +582,10 @@
     var withChildren = node;
     if (withChildren.children && withChildren.children.length) {
       for (var i = 0; i < withChildren.children.length; i++) {
-        await applyNodeMapping(withChildren.children[i], mappingEntries, frameRenames);
+        mappedCount += await applyNodeMapping(withChildren.children[i], mappingEntries, frameRenames);
       }
     }
+    return mappedCount;
   }
   function findSectionInsertionIndex(sectionName, allPages) {
     var UTILITY_PREFIXES = ["Briefing Template", "Template", "Cover", "Status", "Safe Zone", "Export"];
@@ -646,72 +946,55 @@
       const uploadsW = 280 * S;
       const { wrapper: briefingWrapper, body: briefingCol } = makeColumnWithHeader2("Briefing", colW, true);
       row.appendChild(briefingWrapper);
-      const briefingBlocks = [
-        { label: "Name EXP", value: "EXP-NAME" },
-        { label: "IDEA:", value: "IDEA:" },
-        { label: "WHY:", value: "WHY:" },
-        { label: "AUDIENCE/REGION:", value: "AUDIENCE/REGION:" },
-        { label: "SEGMENT: ALL", value: "SEGMENT: ALL" },
-        { label: "FORMATS:", value: "FORMATS:" },
-        { label: "VARIANTS: 4", value: "VARIANTS: 4" },
-        { label: "Product:", value: "Product:" },
-        { label: "Visual", value: null },
-        { label: "Copy info:", value: null },
-        { label: "Note: -", value: "Note: -" },
-        { label: "Test: -", value: "Test: -" },
-        { label: "VARIANTS", value: "VARIANTS" }
-      ];
-      const darkHeaderLabels = /* @__PURE__ */ new Set(["Name EXP", "VARIANTS"]);
-      const tintedLabels = /* @__PURE__ */ new Set([
+      const nameBlock = makeBlockFrame();
+      nameBlock.fills = [solidPaint(0.25, 0.25, 0.27)];
+      const nameText = makeTextNode("Name EXP", "EXP-NAME", font);
+      nameText.setPluginData("heimdallId", "heimdall:exp_name");
+      nameText.setPluginData("placeholderId", "heimdall:exp_name");
+      applyTextColor(nameText, 1, 1, 1);
+      appendAndStretch(nameBlock, nameText);
+      appendAndStretch(briefingCol, nameBlock);
+      const briefingContentPlaceholder = [
         "IDEA:",
+        "Your core creative idea.",
+        "",
         "WHY:",
+        "Strategic rationale.",
+        "",
         "AUDIENCE/REGION:",
+        "Target audience and region.",
+        "",
         "SEGMENT: ALL",
+        "",
         "FORMATS:",
+        "e.g. Static, Video, Carousel.",
+        "",
         "VARIANTS: 4",
-        "Product:"
-      ]);
-      for (const item of briefingBlocks) {
-        const block = makeBlockFrame();
-        if (item.value === null) {
-          const elements = figma.createFrame();
-          elements.name = "Elements";
-          elements.layoutMode = "VERTICAL";
-          elements.primaryAxisSizingMode = "AUTO";
-          elements.counterAxisSizingMode = "FIXED";
-          elements.itemSpacing = 6 * S;
-          elements.fills = [];
-          appendAndStretch(block, elements);
-          const label = makeTextNode(item.label, item.label, font);
-          appendAndStretch(elements, label);
-          const specs = figma.createFrame();
-          specs.name = "Specs";
-          specs.layoutMode = "VERTICAL";
-          specs.primaryAxisSizingMode = "AUTO";
-          specs.counterAxisSizingMode = "FIXED";
-          specs.fills = [];
-          appendAndStretch(elements, specs);
-          const dash = makeTextNode("-", "-", font);
-          appendAndStretch(specs, dash);
-          if (item.label === "Visual" || item.label === "Copy info:") {
-            block.fills = [solidPaint(0.96, 0.97, 0.99)];
-          }
-        } else {
-          const tn = makeTextNode(item.label, item.value, font);
-          if (item.label === "Name EXP") {
-            tn.setPluginData("heimdallId", "heimdall:exp_name");
-            tn.setPluginData("placeholderId", "heimdall:exp_name");
-          }
-          if (darkHeaderLabels.has(item.label)) {
-            block.fills = [solidPaint(0.25, 0.25, 0.27)];
-            applyTextColor(tn, 1, 1, 1);
-          } else if (tintedLabels.has(item.label)) {
-            block.fills = [solidPaint(0.96, 0.97, 0.99)];
-          }
-          appendAndStretch(block, tn);
-        }
-        appendAndStretch(briefingCol, block);
-      }
+        "",
+        "Product:",
+        "Product context.",
+        "",
+        "Visual:",
+        "Visual direction.",
+        "",
+        "Copy info:",
+        "Copy tone and CTAs.",
+        "",
+        "Note: -",
+        "",
+        "Test: -"
+      ].join("\n");
+      const briefingContentBlock = makeBlockFrame();
+      briefingContentBlock.fills = [solidPaint(0.96, 0.97, 0.99)];
+      const briefingContentText = makeTextNode("Briefing Content", briefingContentPlaceholder, font);
+      appendAndStretch(briefingContentBlock, briefingContentText);
+      appendAndStretch(briefingCol, briefingContentBlock);
+      const variantsHeaderBlock = makeBlockFrame();
+      variantsHeaderBlock.fills = [solidPaint(0.25, 0.25, 0.27)];
+      const variantsHeaderText = makeTextNode("VARIANTS", "VARIANTS", font);
+      applyTextColor(variantsHeaderText, 1, 1, 1);
+      appendAndStretch(variantsHeaderBlock, variantsHeaderText);
+      appendAndStretch(briefingCol, variantsHeaderBlock);
       const variantPlaceholder = (letter) => `${letter} - Image
 Input visual + copy direction:
 Script:`;
@@ -1110,9 +1393,24 @@ Script:`;
       }
     }
     walk(page);
-    return gallery != null ? gallery : columnBody;
+    const result = gallery != null ? gallery : columnBody;
+    if (!result) {
+      console.warn("findUploadsBody: Uploads Gallery not found on page", page.name);
+    }
+    return result;
+  }
+  function isSupportedImageFormat(bytes) {
+    if (bytes.length < 4) return false;
+    const png = bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
+    const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+    const gif = bytes[0] === 71 && bytes[1] === 73 && bytes[2] === 70 && (bytes[3] === 56 || bytes[3] === 57);
+    return png || jpeg || gif;
   }
   async function placeImageInUploads(uploadsBody, imageBytes, imageName) {
+    if (!isSupportedImageFormat(imageBytes)) {
+      console.warn("Skipping unsupported image format (use PNG/JPEG/GIF):", imageName);
+      return false;
+    }
     try {
       const image = figma.createImage(imageBytes);
       const rect = figma.createRectangle();
@@ -1139,8 +1437,15 @@ Script:`;
   }
   async function importImagesToPage(pageId, images) {
     const page = figma.getNodeById(pageId);
-    if (!page || page.type !== "PAGE") return 0;
-    const uploadsBody = findUploadsBody(page);
+    if (!page || page.type !== "PAGE") {
+      console.warn("importImagesToPage: page not found or not a PAGE", pageId);
+      return 0;
+    }
+    let uploadsBody = findUploadsBody(page);
+    if (!uploadsBody) {
+      await new Promise((r) => setTimeout(r, 500));
+      uploadsBody = findUploadsBody(page);
+    }
     if (!uploadsBody) {
       console.warn("No Uploads column found in page:", page.name);
       return 0;
@@ -1268,6 +1573,7 @@ Script:`;
             break;
           }
         }
+        var usedPlaceholderFallback = false;
         if (hasMapping) {
           var mappingEntries = [];
           for (var m = 0; m < job.nodeMapping.length; m++) {
@@ -1279,11 +1585,21 @@ Script:`;
               value: val
             });
           }
-          await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice());
+          var mappedCount = await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice());
+          if (mappedCount === 0) {
+            await fillTextNodes(contentRoot, briefing);
+            usedPlaceholderFallback = true;
+            debugLog.push({
+              nodeName: "__MAPPING_FALLBACK__",
+              chars: "Node mapping matched 0 nodes; used placeholder fallback.",
+              path: [],
+              matched: true
+            });
+          }
         } else {
           await fillTextNodes(contentRoot, briefing);
         }
-        if (!hasMapping) {
+        if (!hasMapping || usedPlaceholderFallback) {
           var layoutResult = await normalizeLayout(contentRoot);
           debugLog.push({
             nodeName: "__LAYOUT_NORM__",
@@ -1301,12 +1617,21 @@ Script:`;
     }
     return results;
   }
-  var uiHtml = '<html><head><style>body{font-family:Inter,sans-serif;padding:12px;margin:0;}h3{margin:0 0 8px 0;font-size:13px;}.row{display:flex;gap:8px;align-items:center;margin:8px 0;}.label{font-size:11px;color:#555;min-width:68px;}input{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;}button{padding:8px 16px;background:#0d99ff;color:#fff;border:none;border-radius:6px;cursor:pointer;width:100%;font-size:12px;}button:hover{background:#0b85e0;}.secondary{background:#fff;color:#333;border:1px solid #ddd;width:auto;padding:6px 10px;}.secondary:hover{background:#f6f6f6;}#msg{font-size:11px;color:#666;margin-top:8px;min-height:20px;}.err{color:#f24822;}</style></head><body><h3>Heimdall Sync</h3><div class="row"><span class="label">API base</span><input id="api-base" placeholder="http://localhost:3846" /><button class="secondary" id="save-api">Save</button></div><p id="msg">Sync queued briefings from Monday into this file.</p><button id="sync">Sync queued briefings</button><button id="create-template" style="margin-top:8px;">Create Auto-Layout Template</button><script>parent.postMessage({ pluginMessage: { type: "ui-boot" } }, "*");window.onerror = function(message, source, lineno, colno) {  parent.postMessage({ pluginMessage: { type: "ui-script-error", message: String(message || ""), source: String(source || ""), lineno: Number(lineno || 0), colno: Number(colno || 0) } }, "*");};window.addEventListener("unhandledrejection", function(ev) {  var reason = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : "unknown";  parent.postMessage({ pluginMessage: { type: "ui-script-rejection", reason: String(reason) } }, "*");});var DEFAULT_HEIMDALL_API = "http://localhost:3846";var HEIMDALL_API = DEFAULT_HEIMDALL_API;var fileKey = "";var isSyncing = false;function sanitizeApiBase(raw) {  var v = (raw || "").trim();  if (!v) return DEFAULT_HEIMDALL_API;  return v.replace(/\\/$/, "");}function setApiBase(raw) {  HEIMDALL_API = sanitizeApiBase(raw);  var input = document.getElementById("api-base");  if (input) input.value = HEIMDALL_API;}document.getElementById("save-api").onclick = function() {  var input = document.getElementById("api-base");  setApiBase(input ? input.value : "");  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: HEIMDALL_API } }, "*");  var el = document.getElementById("msg");  el.textContent = "Saved API base: " + HEIMDALL_API;  el.className = "";};document.getElementById("sync").onclick = function() {  if (isSyncing) { document.getElementById("msg").textContent = "Sync already in progress..."; return; }  isSyncing = true;  document.getElementById("msg").textContent = "Fetching queued jobs...";  document.getElementById("msg").className = "";  parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");};document.getElementById("create-template").onclick = function() {  document.getElementById("msg").textContent = "Creating template...";  document.getElementById("msg").className = "";  parent.postMessage({ pluginMessage: { type: "create-template" } }, "*");};parent.postMessage({ pluginMessage: { type: "ui-handlers-bound", hasSync: !!document.getElementById("sync"), hasCreate: !!document.getElementById("create-template"), hasSave: !!document.getElementById("save-api") } }, "*");function fetchJobs(fk) {  fileKey = fk;  fetch(HEIMDALL_API + "/api/jobs/queued?fileKey=" + encodeURIComponent(fk))    .then(function(r) { return r.json(); })    .then(function(data) {      var jobs = data.jobs || [];      if (jobs.length === 0) {        document.getElementById("msg").textContent = "No file-specific jobs. Checking all queued...";        return fetch(HEIMDALL_API + "/api/jobs/queued").then(function(r2){return r2.json();}).then(function(d2){          var all = d2.jobs || [];          if (all.length === 0) { document.getElementById("msg").textContent = "No queued jobs."; return; }          document.getElementById("msg").textContent = "Found " + all.length + " job(s) (cross-file). Creating pages...";          parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: all } }, "*");        });      }      document.getElementById("msg").textContent = "Found " + jobs.length + " job(s). Creating pages...";      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");    })    .catch(function(e) {      isSyncing = false;      document.getElementById("msg").textContent = "Fetch error: " + e.message;      document.getElementById("msg").className = "err";    });}function reportResults(results) {  var done = 0; var failed = [];  var promises = [];  for (var i = 0; i < results.length; i++) {    var r = results[i];    if (r.error) {      failed.push(r.experimentPageName);      promises.push(fetch(HEIMDALL_API + "/api/jobs/fail", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({idempotencyKey: r.idempotencyKey, errorCode: r.error}) }).catch(function(){}));    } else {      done++;      promises.push(fetch(HEIMDALL_API + "/api/jobs/complete", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({idempotencyKey: r.idempotencyKey, figmaPageId: r.pageId, figmaFileUrl: r.fileUrl}) }).catch(function(){}));    }  }  Promise.all(promises).then(function() {    isSyncing = false;    var el = document.getElementById("msg");    el.textContent = "Done: " + done + " page(s) created." + (failed.length ? " Failed: " + failed.join(", ") : "");    el.className = failed.length ? "err" : "";  });}function fetchAllImages(images) {  var el = document.getElementById("msg");  el.textContent = "Fetching " + images.length + " image(s) from Monday...";  el.className = "";  var results = [];  var done = 0;  var errors = 0;  function next(i) {    if (i >= images.length) {      el.textContent = "Images fetched: " + (done - errors) + " ok, " + errors + " failed. Importing...";      parent.postMessage({ pluginMessage: { type: "images-fetched", images: results, imageCount: images.length } }, "*");      return;    }    var img = images[i];    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;    var fetchUrl = HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url);    fetch(fetchUrl)      .then(function(r) {        if (!r.ok) throw new Error("HTTP " + r.status);        return r.arrayBuffer();      })      .then(function(buf) {        results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });        done++;        next(i + 1);      })      .catch(function(err) {        console.warn("Image fetch failed:", img.url, err);        errors++;        done++;        next(i + 1);      });  }  next(0);}onmessage = function(e) {  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;  if (d.type === "file-key") {    fetchJobs(d.fileKey);  }  if (d.type === "jobs-processed") {    reportResults(d.results);  }  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_HEIMDALL_API);  if (d.type === "create-template-done") {    var el = document.getElementById("msg");    el.textContent = d.error ? "Template error: " + d.error : "Template created. You can now sync briefings.";    el.className = d.error ? "err" : "";  }  if (d.type === "fetch-images" && d.images && d.images.length > 0) {    fetchAllImages(d.images);  }  if (d.type === "images-import-done") {    var el = document.getElementById("msg");    var prev = el.textContent || "";    el.textContent = prev + " | Images: " + d.placed + "/" + d.total + " placed in Figma.";  }  if (d.type === "debug-log") {    var el = document.getElementById("msg");    el.style.whiteSpace = "pre-wrap";    el.style.fontSize = "9px";    el.style.maxHeight = "300px";    el.style.overflow = "auto";    el.textContent = d.text;  }};parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");<\/script></body></html>';
+  var uiHtml = '<html><head><style>body{font-family:Inter,sans-serif;padding:12px;margin:0;}h3{margin:0 0 8px 0;font-size:13px;}.tabs{display:flex;gap:8px;margin:0 0 8px 0;}.tab{padding:7px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:11px;}.tab.active{background:#0d99ff;color:#fff;border-color:#0d99ff;}.row{display:flex;gap:8px;align-items:center;margin:8px 0;}.label{font-size:11px;color:#555;min-width:68px;}input{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;}button{padding:8px 16px;background:#0d99ff;color:#fff;border:none;border-radius:6px;cursor:pointer;width:100%;font-size:12px;}button:hover{background:#0b85e0;}.secondary{background:#fff;color:#333;border:1px solid #ddd;width:auto;padding:6px 10px;}.secondary:hover{background:#f6f6f6;}#msg{font-size:11px;color:#666;margin-top:8px;min-height:20px;}.err{color:#f24822;}.list{list-style:none;padding:0;margin:8px 0;max-height:220px;overflow-y:auto;}.list li{padding:6px 8px;margin:2px 0;background:#f6f6f6;border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center;}.badge{font-size:9px;padding:2px 6px;border-radius:4px;background:#0d99ff;color:#fff;}.badge.synced{background:#0fa958;}.badge.new{background:#888;}select{padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;min-width:140px;}</style></head><body><div class="tabs"><button class="tab active" id="tab-sync">Sync Briefings</button><button class="tab" id="tab-comments">Export Comments</button></div><h3>Heimdall Sync</h3><div class="row"><span class="label">API base</span><input id="api-base" placeholder="http://localhost:3846" /><button class="secondary" id="save-api">Save</button></div><div id="sync-panel">  <div id="batch-select-wrap" style="display:none;"><span class="label">Batch</span><select id="batch-select"></select><button class="secondary" id="batch-apply">Apply</button></div>  <p id="batch-label" style="margin:4px 0;font-size:12px;font-weight:600;"></p>  <ul id="briefings-list" class="list"></ul>  <p id="msg" style="margin:8px 0;min-height:20px;font-size:11px;color:#666;"></p>  <button id="sync">Sync</button></div><button id="create-template" style="margin-top:8px;">Create Auto-Layout Template</button><script>parent.postMessage({ pluginMessage: { type: "ui-boot" } }, "*");window.onerror = function(message, source, lineno, colno) {  parent.postMessage({ pluginMessage: { type: "ui-script-error", message: String(message || ""), source: String(source || ""), lineno: Number(lineno || 0), colno: Number(colno || 0) } }, "*");};window.addEventListener("unhandledrejection", function(ev) {  var reason = ev && ev.reason ? (ev.reason.message || String(ev.reason)) : "unknown";  parent.postMessage({ pluginMessage: { type: "ui-script-rejection", reason: String(reason) } }, "*");});var DEFAULT_HEIMDALL_API = "http://localhost:3846";var HEIMDALL_API = DEFAULT_HEIMDALL_API;var fileKey = "";var fileName = "";var isSyncing = false;var currentBriefings = [];var queuedJobIds = [];function sanitizeApiBase(raw) {  var v = (raw || "").trim();  if (!v) return DEFAULT_HEIMDALL_API;  return v.replace(/\\/$/, "");}function setApiBase(raw) {  HEIMDALL_API = sanitizeApiBase(raw);  var input = document.getElementById("api-base");  if (input) input.value = HEIMDALL_API;}document.getElementById("save-api").onclick = function() {  var input = document.getElementById("api-base");  setApiBase(input ? input.value : "");  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: HEIMDALL_API } }, "*");  document.getElementById("msg").textContent = "Saved API base: " + HEIMDALL_API;  document.getElementById("msg").className = "";};document.getElementById("tab-comments").onclick = function() {  parent.postMessage({ pluginMessage: { type: "open-export-comments" } }, "*");};document.getElementById("create-template").onclick = function() {  document.getElementById("msg").textContent = "Creating template...";  document.getElementById("msg").className = "";  parent.postMessage({ pluginMessage: { type: "create-template" } }, "*");};function showBriefings(data) {  currentBriefings = data.items || [];  var listEl = document.getElementById("briefings-list");  listEl.innerHTML = "";  var batchLabel = document.getElementById("batch-label");  batchLabel.textContent = data.batchLabel ? (data.batchLabel + " (" + currentBriefings.length + ")") : "";  for (var i = 0; i < currentBriefings.length; i++) {    var it = currentBriefings[i];    var li = document.createElement("li");    li.textContent = it.name + " | " + (it.batch || "");    var badge = document.createElement("span");    badge.className = "badge " + (it.syncState || "new");    badge.textContent = it.syncState === "synced" ? "Synced" : "New";    li.appendChild(badge);    listEl.appendChild(li);  }  var syncBtn = document.getElementById("sync");  var newCount = currentBriefings.filter(function(it){ return it.syncState !== "synced"; }).length;  syncBtn.textContent = newCount > 0 ? "Sync " + newCount + " briefing(s)" : "Sync all";  syncBtn.disabled = currentBriefings.length === 0;  document.getElementById("msg").textContent = currentBriefings.length === 0 ? "No briefings match this batch and filters." : "";  document.getElementById("msg").className = "";}function fetchBriefings(selectedBatch) {  document.getElementById("msg").textContent = "Loading briefings...";  document.getElementById("msg").className = "";  var body = { fileName: fileName, fileKey: fileKey };  if (selectedBatch) body.batch = selectedBatch;  fetch(HEIMDALL_API + "/api/plugin/briefings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })    .then(function(r) { return r.json(); })    .then(function(data) {      if (data.needsBatchSelection && data.availableBatches && data.availableBatches.length > 0) {        document.getElementById("batch-select-wrap").style.display = "flex";        document.getElementById("batch-select-wrap").className = "row";        var sel = document.getElementById("batch-select");        sel.innerHTML = "";        var labels = data.batchLabels || data.availableBatches;        for (var i = 0; i < data.availableBatches.length; i++) {          var opt = document.createElement("option");          opt.value = data.availableBatches[i];          opt.textContent = labels[i] || data.availableBatches[i];          sel.appendChild(opt);        }        document.getElementById("batch-label").textContent = "";        document.getElementById("briefings-list").innerHTML = "";        document.getElementById("msg").textContent = "Select a batch to show briefings.";        return;      }      document.getElementById("batch-select-wrap").style.display = "none";      if (data.error) { document.getElementById("msg").textContent = data.error; document.getElementById("msg").className = "err"; return; }      showBriefings(data);    })    .catch(function(e) {      document.getElementById("msg").textContent = "Error: " + e.message;      document.getElementById("msg").className = "err";    });}document.getElementById("batch-apply").onclick = function() {  var sel = document.getElementById("batch-select");  fetchBriefings(sel && sel.value ? sel.value : null);};document.getElementById("sync").onclick = function() {  if (isSyncing) return;  if (currentBriefings.length === 0) {    document.getElementById("msg").textContent = "No briefings loaded yet. Wait for load or check API base/filters.";    document.getElementById("msg").className = "err";    return;  }  isSyncing = true;  document.getElementById("msg").textContent = "Queueing briefings...";  document.getElementById("sync").disabled = true;  var items = currentBriefings.map(function(it){ return { id: it.id, name: it.name, batch: it.batch }; });  fetch(HEIMDALL_API + "/api/plugin/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileKey: fileKey || "", items: items }) })    .then(function(r) { return r.json(); })    .then(function(data) {      if (data.error) { document.getElementById("msg").textContent = data.error; document.getElementById("msg").className = "err"; isSyncing = false; document.getElementById("sync").disabled = false; return; }      queuedJobIds = (data.jobs || []).map(function(j){ return j.id; });      document.getElementById("msg").textContent = "Queued " + (data.queued || 0) + ". Fetching jobs...";      var q = "";      if (fileKey) q = "fileKey=" + encodeURIComponent(fileKey);      else if (items.length > 0 && items[0].batch) q = "batch=" + encodeURIComponent(items[0].batch);      return fetch(HEIMDALL_API + "/api/jobs/queued" + (q ? ("?" + q) : "")).then(function(r2){ return r2.json(); });    })    .then(function(data2) {      var jobs = (data2 && data2.jobs) ? data2.jobs : [];      if (queuedJobIds.length > 0) {        jobs = jobs.filter(function(j){ return queuedJobIds.indexOf(j.id) >= 0; });      }      if (jobs.length === 0) { document.getElementById("msg").textContent = "No jobs returned. Try again in a moment."; isSyncing = false; document.getElementById("sync").disabled = false; return; }      document.getElementById("msg").textContent = "Creating " + jobs.length + " page(s)...";      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");    })    .catch(function(e) {      isSyncing = false;      document.getElementById("sync").disabled = false;      document.getElementById("msg").textContent = "Error: " + e.message;      document.getElementById("msg").className = "err";    });};parent.postMessage({ pluginMessage: { type: "ui-handlers-bound" } }, "*");function fetchJobs(fk) {  fileKey = fk;  fetch(HEIMDALL_API + "/api/jobs/queued?fileKey=" + encodeURIComponent(fk))    .then(function(r) { return r.json(); })    .then(function(data) {      var jobs = data.jobs || [];      if (jobs.length === 0) {        document.getElementById("msg").textContent = "No file-specific jobs. Checking all queued...";        return fetch(HEIMDALL_API + "/api/jobs/queued").then(function(r2){return r2.json();}).then(function(d2){          var all = d2.jobs || [];          if (all.length === 0) { document.getElementById("msg").textContent = "No queued jobs."; isSyncing = false; return; }          document.getElementById("msg").textContent = "Found " + all.length + " job(s). Creating pages...";          parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: all } }, "*");        });      }      document.getElementById("msg").textContent = "Found " + jobs.length + " job(s). Creating pages...";      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");    })    .catch(function(e) {      isSyncing = false;      document.getElementById("msg").textContent = "Fetch error: " + e.message;      document.getElementById("msg").className = "err";    });}function reportResults(results) {  var done = 0; var failed = [];  var promises = [];  for (var i = 0; i < results.length; i++) {    var r = results[i];    if (r.error) {      failed.push(r.experimentPageName);      promises.push(fetch(HEIMDALL_API + "/api/jobs/fail", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({idempotencyKey: r.idempotencyKey, errorCode: r.error}) }).catch(function(){}));    } else {      done++;      promises.push(fetch(HEIMDALL_API + "/api/jobs/complete", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({idempotencyKey: r.idempotencyKey, figmaPageId: r.pageId, figmaFileUrl: r.fileUrl}) }).catch(function(){}));    }  }  Promise.all(promises).then(function() {    isSyncing = false;    var syncBtn = document.getElementById("sync");    if (syncBtn) syncBtn.disabled = false;    var el = document.getElementById("msg");    el.textContent = "Done: " + done + " page(s) created." + (failed.length ? " Failed: " + failed.join(", ") : "");    el.className = failed.length ? "err" : "";  });}function fetchAllImages(images) {  var el = document.getElementById("msg");  el.textContent = "Fetching " + images.length + " image(s) from Monday...";  el.className = "";  var results = [];  var done = 0;  var errors = 0;  function next(i) {    if (i >= images.length) {      el.textContent = "Images fetched: " + (done - errors) + " ok, " + errors + " failed. Importing...";      parent.postMessage({ pluginMessage: { type: "images-fetched", images: results, imageCount: images.length } }, "*");      return;    }    var img = images[i];    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;    var fetchUrl = (img.assetId && !img.url) ? (HEIMDALL_API + "/api/images/proxy?assetId=" + encodeURIComponent(img.assetId)) : (HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url || ""));    function doFetch(attempt) {      fetch(fetchUrl)        .then(function(r) {          if (!r.ok) throw new Error("HTTP " + r.status);          return r.arrayBuffer();        })        .then(function(buf) {          results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });          done++;          next(i + 1);        })        .catch(function(err) {          if (attempt < 2) { setTimeout(function() { doFetch(attempt + 1); }, 500); }          else { console.warn("Image fetch failed:", img.url || img.assetId, err); errors++; done++; next(i + 1); }        });    }    doFetch(1);  }  next(0);}onmessage = function(e) {  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;  if (d.type === "context") {    fileKey = d.fileKey || "";    fileName = d.fileName || "";    fetchBriefings(null);    if (!fileKey) document.getElementById("msg").textContent = "File key unavailable in this context. Continuing with batch-based sync.";  }  if (d.type === "file-key") {    fetchJobs(d.fileKey);  }  if (d.type === "jobs-processed") {    reportResults(d.results);  }  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_HEIMDALL_API);  if (d.type === "create-template-done") {    var el = document.getElementById("msg");    el.textContent = d.error ? "Template error: " + d.error : "Template created. You can now sync briefings.";    el.className = d.error ? "err" : "";  }  if (d.type === "fetch-images" && d.images && d.images.length > 0) {    fetchAllImages(d.images);  }  if (d.type === "images-import-done") {    var el = document.getElementById("msg");    var prev = el.textContent || "";    el.textContent = prev + " | Images: " + d.placed + "/" + d.total + " placed in Figma.";  }  if (d.type === "debug-log") {    var el = document.getElementById("msg");    el.style.whiteSpace = "pre-wrap";    el.style.fontSize = "9px";    el.style.maxHeight = "300px";    el.style.overflow = "auto";    el.textContent = d.text;  }};parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");<\/script></body></html>';
   function runSyncBriefings() {
     figma.showUI(uiHtml, { width: 460, height: 580 });
     figma.ui.onmessage = async function(msg) {
       var _a, _b;
+      if (msg.type === "open-export-comments") {
+        runExportComments();
+        return;
+      }
       if (msg.type === "ui-boot") {
+        figma.ui.postMessage({
+          type: "context",
+          fileName: figma.root.name,
+          fileKey: figma.fileKey || ""
+        });
       }
       if (msg.type === "ui-handlers-bound") {
       }
@@ -1382,12 +1707,15 @@ Script:`;
             imageRequests.push({
               url: job.images[ii].url,
               name: job.images[ii].name,
-              pageId: matchResult.pageId
+              pageId: matchResult.pageId,
+              assetId: job.images[ii].assetId
             });
           }
         }
         if (imageRequests.length > 0) {
-          figma.ui.postMessage({ type: "fetch-images", images: imageRequests });
+          setTimeout(function() {
+            figma.ui.postMessage({ type: "fetch-images", images: imageRequests });
+          }, 200);
         }
       }
       if (msg.type === "images-fetched" && msg.images) {
@@ -1404,7 +1732,12 @@ Script:`;
         }
         var pageIds = Object.keys(byPage);
         for (var pi = 0; pi < pageIds.length; pi++) {
-          var placed = await importImagesToPage(pageIds[pi], byPage[pageIds[pi]]);
+          var pageId = pageIds[pi];
+          var page = figma.getNodeById(pageId);
+          if (page && page.type === "PAGE" && typeof page.loadAsync === "function") {
+            await page.loadAsync();
+          }
+          var placed = await importImagesToPage(pageId, byPage[pageId]);
           totalPlaced += placed;
         }
         figma.ui.postMessage({
@@ -1412,303 +1745,6 @@ Script:`;
           placed: totalPlaced,
           total: (_b = msg.imageCount) != null ? _b : msg.images.length
         });
-      }
-    };
-  }
-
-  // src/commands/exportComments.ts
-  var commentsUiHtml = `<html><head><style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:Inter,-apple-system,system-ui,sans-serif;background:#1e1e1e;color:#e0e0e0;overflow:hidden;height:100vh;display:flex;flex-direction:column;}
-.header{padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #333;flex-shrink:0;}
-.header .logo{font-size:13px;font-weight:700;letter-spacing:1.5px;color:#fff;text-transform:uppercase;}
-.header .logo span{opacity:0.4;font-weight:400;margin-left:4px;font-size:10px;letter-spacing:0;}
-.toolbar{padding:10px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #2a2a2a;flex-shrink:0;}
-.btn{display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;border-radius:5px;font-size:10px;font-weight:500;cursor:pointer;border:none;transition:all 0.15s;}
-.btn:disabled{opacity:0.35;cursor:not-allowed;}
-.btn-primary{background:#3b82f6;color:#fff;}
-.btn-primary:hover:not(:disabled){background:#2563eb;}
-.btn-outline{background:transparent;border:1px solid #444;color:#ccc;}
-.btn-outline:hover:not(:disabled){border-color:#666;background:rgba(255,255,255,0.05);}
-.btn-sm{padding:4px 8px;font-size:9px;}
-.filter-row{display:flex;gap:6px;align-items:center;}
-.filter-label{font-size:9px;color:#666;}
-.filter-select{padding:3px 6px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:4px;color:#ddd;font-size:9px;font-family:inherit;outline:none;}
-.stats{font-size:9px;color:#666;margin-left:auto;white-space:nowrap;}
-.content{flex:1;overflow-y:auto;padding:0;}
-.status-bar{padding:8px 16px;font-size:10px;color:#888;min-height:20px;line-height:1.4;flex-shrink:0;}
-.status-bar.err{color:#f24822;}
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:24px;text-align:center;color:#666;}
-.empty-icon{font-size:28px;margin-bottom:8px;opacity:0.4;}
-.empty-title{font-size:12px;font-weight:600;margin-bottom:4px;color:#888;}
-.empty-desc{font-size:10px;line-height:1.4;max-width:260px;}
-.comment-list{padding:0;}
-.comment-item{padding:10px 16px;border-bottom:1px solid #2a2a2a;transition:background 0.1s;}
-.comment-item:hover{background:rgba(255,255,255,0.02);}
-.comment-item.reply{padding-left:32px;border-left:2px solid #333;margin-left:16px;}
-.comment-meta{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
-.comment-author{font-size:10px;font-weight:600;color:#ddd;}
-.comment-time{font-size:9px;color:#555;}
-.comment-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:500;margin-left:4px;}
-.badge-open{background:rgba(59,130,246,0.15);color:#60a5fa;}
-.badge-resolved{background:rgba(34,197,94,0.12);color:#4ade80;}
-.comment-order{font-size:9px;color:#555;font-weight:500;}
-.comment-text{font-size:10px;line-height:1.5;color:#bbb;word-break:break-word;white-space:pre-wrap;}
-.comment-node{font-size:8px;color:#555;margin-top:3px;}
-.footer{flex-shrink:0;padding:8px 16px;border-top:1px solid #333;display:flex;align-items:center;gap:6px;}
-.field-label{font-size:10px;color:#666;min-width:50px;flex-shrink:0;}
-.field-input{flex:1;padding:6px 8px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#ddd;font-size:10px;font-family:inherit;outline:none;transition:border-color 0.15s;}
-.field-input:focus{border-color:#555;}
-</style></head><body>
-
-<div class="header">
-  <div class="logo">Heimdall <span>Comments</span></div>
-</div>
-
-<div class="toolbar">
-  <button class="btn btn-primary" id="fetch-btn">Load Comments</button>
-  <div class="filter-row">
-    <span class="filter-label">Show:</span>
-    <select class="filter-select" id="status-filter">
-      <option value="all">All</option>
-      <option value="open">Open</option>
-      <option value="resolved">Resolved</option>
-    </select>
-  </div>
-  <span class="stats" id="stats"></span>
-  <button class="btn btn-outline btn-sm" id="copy-btn" disabled>Copy CSV</button>
-  <button class="btn btn-outline btn-sm" id="download-btn" disabled>Download</button>
-  <button class="btn btn-outline btn-sm" id="open-sheet-btn" disabled style="border-color:#555;color:#adf7b6;">Open Sheet</button>
-</div>
-
-<div class="content" id="content">
-  <div class="empty">
-    <div class="empty-icon">&#128172;</div>
-    <div class="empty-title">No comments loaded</div>
-    <div class="empty-desc">Click "Load Comments" to fetch all comments from this Figma file via the Heimdall backend.</div>
-  </div>
-</div>
-
-<div id="status" class="status-bar">Ready.</div>
-
-<div class="footer">
-  <span class="field-label">API</span>
-  <input id="api-base" class="field-input" placeholder="http://localhost:3846" style="font-size:9px;" />
-  <button class="btn btn-outline btn-sm" id="save-api">Save</button>
-</div>
-
-<script>
-parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");
-parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");
-
-var DEFAULT_HEIMDALL_API = "http://localhost:3846";
-var HEIMDALL_API = DEFAULT_HEIMDALL_API;
-var fileKey = "";
-var allComments = [];
-var loading = false;
-
-function setStatus(text, isErr) {
-  var el = document.getElementById("status");
-  el.textContent = text;
-  el.className = isErr ? "status-bar err" : "status-bar";
-}
-
-function sanitizeApiBase(raw) {
-  var v = (raw || "").trim();
-  if (!v) return DEFAULT_HEIMDALL_API;
-  return v.replace(/\\/$/, "");
-}
-function setApiBase(raw) {
-  HEIMDALL_API = sanitizeApiBase(raw);
-  var input = document.getElementById("api-base");
-  if (input) input.value = HEIMDALL_API;
-}
-
-document.getElementById("save-api").onclick = function() {
-  var input = document.getElementById("api-base");
-  setApiBase(input ? input.value : "");
-  parent.postMessage({ pluginMessage: { type: "save-api-base", apiBase: HEIMDALL_API } }, "*");
-};
-
-document.getElementById("fetch-btn").onclick = function() {
-  if (loading) return;
-  if (!fileKey) {
-    parent.postMessage({ pluginMessage: { type: "get-file-key" } }, "*");
-    setStatus("Requesting file key...", false);
-    setTimeout(function() {
-      if (fileKey) fetchComments();
-      else setStatus("Could not get file key. Save your file first.", true);
-    }, 500);
-    return;
-  }
-  fetchComments();
-};
-
-function fetchComments() {
-  if (!fileKey) { setStatus("No file key available.", true); return; }
-  loading = true;
-  setStatus("Fetching comments for " + fileKey + "...", false);
-  document.getElementById("fetch-btn").disabled = true;
-  var url = HEIMDALL_API + "/api/comments?fileKey=" + encodeURIComponent(fileKey);
-  fetch(url)
-    .then(function(r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    })
-    .then(function(data) {
-      loading = false;
-      document.getElementById("fetch-btn").disabled = false;
-      allComments = data.comments || [];
-      setStatus("Loaded " + allComments.length + " comment(s). " +
-        (data.open || 0) + " open, " + (data.resolved || 0) + " resolved.", false);
-      document.getElementById("copy-btn").disabled = allComments.length === 0;
-      document.getElementById("download-btn").disabled = allComments.length === 0;
-      renderComments();
-    })
-    .catch(function(e) {
-      loading = false;
-      document.getElementById("fetch-btn").disabled = false;
-      setStatus("Error: " + e.message, true);
-    });
-}
-
-function renderComments() {
-  var filter = document.getElementById("status-filter").value;
-  var filtered = allComments;
-  if (filter === "open") filtered = allComments.filter(function(c){ return c.status === "open"; });
-  if (filter === "resolved") filtered = allComments.filter(function(c){ return c.status === "resolved"; });
-
-  var topLevel = filtered.filter(function(c){ return c.threadDepth === 0; }).length;
-  var replies = filtered.filter(function(c){ return c.threadDepth > 0; }).length;
-  document.getElementById("stats").textContent = filtered.length + " shown (" + topLevel + " threads, " + replies + " replies)";
-
-  var el = document.getElementById("content");
-  if (filtered.length === 0) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">&#128172;</div><div class="empty-title">No comments match</div><div class="empty-desc">Try changing the filter or load comments first.</div></div>';
-    return;
-  }
-
-  var html = '<div class="comment-list">';
-  for (var i = 0; i < filtered.length; i++) {
-    var c = filtered[i];
-    var isReply = c.threadDepth > 0;
-    var badge = c.status === "resolved"
-      ? '<span class="comment-badge badge-resolved">Resolved</span>'
-      : '<span class="comment-badge badge-open">Open</span>';
-    var orderStr = c.orderNumber ? '<span class="comment-order">#' + c.orderNumber + '</span> ' : '';
-    var time = c.createdAt ? new Date(c.createdAt).toLocaleString() : "";
-    var resolvedTime = c.resolvedAt ? " (resolved " + new Date(c.resolvedAt).toLocaleString() + ")" : "";
-    var nodeInfo = c.nodeId ? '<div class="comment-node">Node: ' + c.nodeId + '</div>' : '';
-    var replyInfo = !isReply && c.replyCount > 0 ? ' &middot; ' + c.replyCount + ' repl' + (c.replyCount === 1 ? 'y' : 'ies') : '';
-
-    html += '<div class="comment-item' + (isReply ? ' reply' : '') + '">'
-      + '<div class="comment-meta">' + orderStr
-      + '<span class="comment-author">' + escHtml(c.author) + '</span>'
-      + '<span class="comment-time">' + time + resolvedTime + replyInfo + '</span>'
-      + (isReply ? '' : badge)
-      + '</div>'
-      + '<div class="comment-text">' + escHtml(c.message) + '</div>'
-      + nodeInfo
-      + '</div>';
-  }
-  html += '</div>';
-  el.innerHTML = html;
-}
-
-function escHtml(s) {
-  if (!s) return "";
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-
-document.getElementById("status-filter").onchange = renderComments;
-
-document.getElementById("copy-btn").onclick = function() {
-  var csv = commentsToCsv();
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(csv).then(function() {
-      setStatus("Copied " + allComments.length + " comment(s) to clipboard as CSV.", false);
-    });
-  } else {
-    var ta = document.createElement("textarea");
-    ta.value = csv;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand("copy");
-    document.body.removeChild(ta);
-    setStatus("Copied " + allComments.length + " comment(s) to clipboard as CSV.", false);
-  }
-};
-
-document.getElementById("download-btn").onclick = function() {
-  if (!fileKey) return;
-  var url = HEIMDALL_API + "/api/comments?fileKey=" + encodeURIComponent(fileKey) + "&format=csv";
-  window.open(url, "_blank");
-  setStatus("Download started.", false);
-};
-
-document.getElementById("open-sheet-btn").onclick = function() {
-  if (!fileKey) return;
-  var url = HEIMDALL_API + "/comments/" + encodeURIComponent(fileKey);
-  window.open(url, "_blank");
-  setStatus("Opening comment sheet in browser...", false);
-};
-
-function commentsToCsv() {
-  var headers = ["#","Author","Message","Created","Resolved","Status","Depth","Replies","Node ID"];
-  var rows = [headers.join(",")];
-  for (var i = 0; i < allComments.length; i++) {
-    var c = allComments[i];
-    rows.push([
-      c.orderNumber || "",
-      csvEsc(c.author),
-      csvEsc(c.message),
-      c.createdAt || "",
-      c.resolvedAt || "",
-      c.status,
-      c.threadDepth,
-      c.replyCount,
-      c.nodeId || ""
-    ].join(","));
-  }
-  return rows.join("\\n");
-}
-
-function csvEsc(val) {
-  if (!val) return "";
-  val = String(val);
-  if (val.indexOf(",") >= 0 || val.indexOf('"') >= 0 || val.indexOf("\\n") >= 0) {
-    return '"' + val.replace(/"/g, '""') + '"';
-  }
-  return val;
-}
-
-onmessage = function(e) {
-  var d = typeof e.data === "object" && e.data.pluginMessage ? e.data.pluginMessage : e.data;
-  if (d.type === "file-key") {
-    fileKey = d.fileKey || "";
-    if (fileKey) document.getElementById("open-sheet-btn").disabled = false;
-  }
-  if (d.type === "api-base") setApiBase(d.apiBase || DEFAULT_HEIMDALL_API);
-};
-parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");
-<\/script></body></html>`;
-  function runExportComments() {
-    figma.showUI(commentsUiHtml, { width: 520, height: 600 });
-    figma.ui.onmessage = async function(msg) {
-      var _a;
-      if (msg.type === "get-api-base") {
-        const saved = await figma.clientStorage.getAsync("heimdallApiBase");
-        const apiBase = typeof saved === "string" && saved.trim() ? saved.trim() : "http://localhost:3846";
-        figma.ui.postMessage({ type: "api-base", apiBase });
-      }
-      if (msg.type === "save-api-base") {
-        const raw = (_a = msg.apiBase) != null ? _a : "";
-        const apiBase = raw.trim().replace(/\/$/, "") || "http://localhost:3846";
-        await figma.clientStorage.setAsync("heimdallApiBase", apiBase);
-        figma.ui.postMessage({ type: "api-base", apiBase });
-      }
-      if (msg.type === "get-file-key") {
-        figma.ui.postMessage({ type: "file-key", fileKey: figma.fileKey || "" });
       }
     };
   }

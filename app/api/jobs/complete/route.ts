@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getJobByIdempotencyKey, updateJobState } from '@/lib/kv'
 import { logger } from '@/lib/logger'
+import { updateSyncFigmaPage } from '@/src/services/briefingSyncStore'
 
 export async function POST(request: Request) {
   try {
@@ -19,6 +20,14 @@ export async function POST(request: Request) {
     }
     
     await updateJobState(job.id, 'completed', { figmaPageId, figmaFileUrl })
+    if (job.figmaFileKey && job.mondayItemId && figmaPageId) {
+      await updateSyncFigmaPage(
+        job.mondayItemId,
+        job.figmaFileKey,
+        figmaPageId,
+        job.experimentPageName ?? null
+      )
+    }
 
     logger.info('figma', 'Job marked completed', {
       jobId: job.id,

@@ -26,6 +26,15 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   /** Extended thinking budget for mapping agent (default 10000). */
   ANTHROPIC_THINKING_BUDGET: z.string().optional(),
+  /** Plugin: CSV status values (e.g. "brief ready,approved"). */
+  PLUGIN_FILTER_STATUS: z.string().optional(),
+  /** Plugin: CSV creative partner values (e.g. "studio,content creation"). */
+  PLUGIN_FILTER_CREATIVE_PARTNER: z.string().optional(),
+  /** Supabase (evidence RAG, comments, auth). Server-side only. */
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_KEY: z.string().min(1).optional(),
+  /** Voyage AI key for evidence embeddings (1024-d). Used by ingestion script and server retrieval. */
+  VOYAGE_API_KEY: z.string().min(1).optional(),
 })
 
 export type Env = z.infer<typeof envSchema>
