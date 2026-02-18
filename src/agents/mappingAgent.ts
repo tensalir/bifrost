@@ -57,14 +57,42 @@ function upsertMapping(
   mappings.push({ nodeName, value })
 }
 
-function extractDocSection(doc: string, heading: string): string | null {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  // Match ## heading followed by content until next ## heading or end
-  const rx = new RegExp(`(?:^|\\n)##\\s*${escaped}\\s*\\n([\\s\\S]*?)(?=\\n##\\s*[A-Za-z]|$)`, 'i')
-  const match = rx.exec(doc)
-  if (!match?.[1]) return null
-  const text = match[1].trim()
-  return text || null
+/** Canonical ALL CAPS labels for known Monday doc section headings (lowercase key). */
+const HEADING_CANONICAL: Record<string, string> = {
+  idea: 'IDEA',
+  why: 'WHY',
+  audience: 'AUDIENCE/REGION',
+  'audience/region': 'AUDIENCE/REGION',
+  formats: 'FORMATS',
+  variants: 'VARIANTS',
+  product: 'PRODUCT',
+  visual: 'VISUAL',
+  'copy info': 'COPY INFO',
+  note: 'NOTE',
+  test: 'TESTING',
+  testing: 'TESTING',
+}
+
+/**
+ * Extract all ## sections from doc in document order.
+ * Unknown headings are included; use canonical map for known ones.
+ */
+function parseAllDocSections(doc: string): Array<{ heading: string; content: string }> {
+  const sections: Array<{ heading: string; content: string }> = []
+  // Match ## heading (line) then content until next ## or EOF
+  const rx = /(?:^|\n)##\s*([^\n]+)\n([\s\S]*?)(?=\n##\s|\n*$)/gi
+  let m: RegExpExecArray | null
+  while ((m = rx.exec(doc)) !== null) {
+    const heading = m[1].trim()
+    const content = m[2].trim()
+    if (heading) sections.push({ heading, content })
+  }
+  return sections
+}
+
+function getCanonicalLabel(heading: string): string {
+  const key = heading.toLowerCase().trim()
+  return HEADING_CANONICAL[key] ?? heading.toUpperCase()
 }
 
 interface VariantRow {
@@ -90,6 +118,26 @@ function remainderAfterFirstSentence(value: string | undefined): string | undefi
   return match?.[1]?.trim() || undefined
 }
 
+/** Ensure a blank line precedes any line that starts with "Copy:" (variant block sub-label). */
+function ensureBlankLineBeforeCopy(text: string): string {
+  return text.replace(/\n(\s*Copy:)/gi, '\n\n$1')
+}
+
+function inferVariantCount(content: string, variantRows: VariantRow[]): number | null {
+  const firstLine = content.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? ''
+  if (/^\d+$/.test(firstLine)) return Number(firstLine)
+
+  const rowCount = new Set(variantRows.map((r) => r.id)).size
+  if (rowCount > 0) return rowCount
+
+  const inlineLetters = new Set<string>()
+  for (const line of content.split(/\r?\n/)) {
+    const m = /^\s*[-*]?\s*([A-D])\s*-\s*/i.exec(line)
+    if (m) inlineLetters.add(m[1].toUpperCase())
+  }
+  return inlineLetters.size > 0 ? inlineLetters.size : null
+}
+
 /** Match start of a variant table row: |  A - Video | or | B - Video | */
 const ROW_START = /^\|\s*([A-D])\s*-\s*([^|]+)\|/i
 
@@ -100,8 +148,8 @@ const ROW_START = /^\|\s*([A-D])\s*-\s*([^|]+)\|/i
  */
 function parseVariantTableRows(doc: string): VariantRow[] {
   const out: VariantRow[] = []
-  // Find table body: after the | --- | --- | --- | separator
-  const sepMatch = doc.match(/\|\s*---\s*\|\s*---\s*\|\s*---\s*\|/)
+  // Find table body: after the separator row (2 or 3+ columns)
+  const sepMatch = doc.match(/\|\s*---\s*\|\s*---\s*\|/)
   if (!sepMatch || sepMatch.index === undefined) return out
   const tableStart = sepMatch.index + sepMatch[0].length
   const tableBody = doc.slice(tableStart)
@@ -134,6 +182,9 @@ function parseVariantTableRows(doc: string): VariantRow[] {
       const visualDirection = parts[2].trim() || undefined
       const script = parts[3].trim() || undefined
       out.push({ id, type: typeLabel, visualDirection, script })
+    } else if (parts.length >= 3) {
+      const visualDirection = parts[2].trim() || undefined
+      out.push({ id, type: typeLabel, visualDirection })
     } else {
       out.push({ id, type: typeLabel })
     }
@@ -160,61 +211,52 @@ function deterministicBackfill(
 
   let usedDocAudience = false
   if (mondayDocContent?.trim()) {
-    const idea = extractDocSection(mondayDocContent, 'Idea')
-    const why = extractDocSection(mondayDocContent, 'Why')
-    const audience = extractDocSection(mondayDocContent, 'Audience')
-    const formats = extractDocSection(mondayDocContent, 'Formats')
-    const variants = extractDocSection(mondayDocContent, 'Variants')
-    const product = extractDocSection(mondayDocContent, 'Product')
-    const visual = extractDocSection(mondayDocContent, 'Visual')
-    const copyInfo = extractDocSection(mondayDocContent, 'Copy info')
-    const note = extractDocSection(mondayDocContent, 'Note')
-    const test = extractDocSection(mondayDocContent, 'Test')
+    const sections = parseAllDocSections(mondayDocContent)
     const variantRows = parseVariantTableRows(mondayDocContent)
 
-    // Build single "Briefing Content" body (IDEA through Test/Note) for flexible template.
+    // Build single "Briefing Content" body from all sections (canonical ALL CAPS labels).
     const parts: string[] = []
-    if (idea?.trim()) parts.push(`IDEA:\n${idea.trim()}`)
-    if (why?.trim()) parts.push(`WHY:\n${why.trim()}`)
-    if (audience?.trim()) {
-      parts.push(`AUDIENCE/REGION:\n${audience.trim()}`)
-      usedDocAudience = true
+    for (const { heading, content } of sections) {
+      if (!content.trim()) continue
+      const label = getCanonicalLabel(heading)
+      if (label === 'AUDIENCE/REGION') usedDocAudience = true
+      // VARIANTS: keep count only in Briefing Content; detailed variant body lives in the dedicated variant blocks below.
+      if (label === 'VARIANTS') {
+        const variantCount = inferVariantCount(content, variantRows)
+        if (variantCount && Number.isFinite(variantCount) && variantCount > 0) {
+          parts.push(`VARIANTS: ${variantCount}`)
+        }
+        continue
+      } else {
+        const cleaned = content
+          .replace(/^visual\s*:\s*/i, '')
+          .replace(/^copy\s+info\s*:\s*/i, '')
+          .trim()
+        parts.push(`${label}:\n${cleaned}`)
+      }
     }
-    if (formats?.trim()) parts.push(`FORMATS:\n${formats.trim()}`)
-    if (variants?.trim()) {
-      const firstLine = variants.split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? variants.trim()
-      if (/^\d+$/.test(firstLine)) parts.push(`VARIANTS: ${firstLine}`)
-      else parts.push(`VARIANTS:\n${variants.trim()}`)
-    }
-    if (product?.trim()) parts.push(`Product:\n${product.trim()}`)
-    if (visual?.trim()) {
-      const visualContent = visual.replace(/^visual\s*:\s*/i, '').trim()
-      parts.push(`Visual:\n${visualContent}`)
-    }
-    if (copyInfo?.trim()) {
-      const copyInfoContent = copyInfo.replace(/^copy\s+info\s*:\s*/i, '').trim()
-      parts.push(`Copy info:\n${copyInfoContent}`)
-    }
-    if (note?.trim()) parts.push(`Note:\n${note.trim()}`)
-    if (test?.trim()) parts.push(`Test:\n${test.trim()}`)
     const briefingContent = parts.join('\n\n')
     if (briefingContent) upsertMapping(out.textMappings, 'Briefing Content', briefingContent, true)
 
-    // Variant rows from Monday table -> Briefing column variant blocks.
-    // Use Monday column names as sub-headers: "Input visual + copy direction:" and "Script:".
-    // Only force-overwrite when we actually parsed content (not type-only).
+    // Variant rows from Monday table -> Briefing column variant blocks (ALL CAPS type, blank line before Copy:).
     for (const row of variantRows) {
-      const typeLabel = row.type ? `${row.id} - ${row.type}` : `${row.id} - Image`
+      const typeLabel = row.type
+        ? `${row.id} - ${row.type.toUpperCase()}`
+        : `${row.id} - IMAGE`
       const hasVisual = row.visualDirection?.trim()
       const hasScript = row.script?.trim()
-      const blockValue =
+      let blockValue =
         hasVisual || hasScript
           ? `${typeLabel}\n${hasVisual ? `Input visual + copy direction: ${row.visualDirection!.trim()}\n` : ''}${hasScript ? `Script: ${row.script!.trim()}` : ''}`.trim()
           : typeLabel
+      blockValue = ensureBlankLineBeforeCopy(blockValue)
       const hasContent = !!hasVisual || !!hasScript
       upsertMapping(out.textMappings, `${row.id} - Image`, blockValue, hasContent)
       upsertMapping(out.textMappings, `${row.id} - Image `, blockValue, hasContent)
     }
+
+    // Ensure VARIANTS header node always shows "VARIANTS", never the count.
+    upsertMapping(out.textMappings, 'VARIANTS', 'VARIANTS', true)
   }
 
   // Fallback when doc audience is missing: add region into Briefing Content.
@@ -287,11 +329,14 @@ export function briefingToNodeMapping(dto: BriefingDTO): NodeMappingResult {
 export async function computeNodeMapping(
   mondayItem: MondayItem,
   templateNodeTree: TemplateNodeInfo[],
-  options?: { mondayDocContent?: string | null }
+  options?: { mondayDocContent?: string | null; disableAi?: boolean }
 ): Promise<NodeMappingResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey?.trim()) {
-    logger.info('mapping', 'No Claude API key; using column-only fallback', { mondayItemId: mondayItem.id })
+  if (options?.disableAi || !apiKey?.trim()) {
+    logger.info('mapping', 'Claude mapping disabled or key missing; using deterministic fallback', {
+      mondayItemId: mondayItem.id,
+      disableAi: options?.disableAi === true,
+    })
     const dto = mondayItemToBriefing(mondayItem)
     if (!dto) return { textMappings: [], frameRenames: [] }
     return deterministicBackfill(briefingToNodeMapping(dto), mondayItem, options?.mondayDocContent ?? null)

@@ -5,6 +5,45 @@
  * Figma sandbox cannot fetch localhost; all HTTP goes through UI iframe.
  * Main thread handles: Figma API (clone page, fill text, reorder).
  * UI handles: fetch from Heimdall backend, user interaction.
+ *
+ * ═══════════════════════════════════════════════════════════════════
+ * KNOWN CONSTRAINTS & HARD-LEARNED LESSONS (Sentinel)
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ * 1. FONT LOADING — Figma requires ALL fonts in a text node to be loaded
+ *    before setting .characters or any layout-affecting property (.fontSize,
+ *    .fontName, .lineHeight, etc.). Failure to do so can silently crash the
+ *    plugin sandbox (no error thrown — execution simply stops).
+ *    Ref: https://developers.figma.com/docs/plugins/working-with-text
+ *    Official pattern: node.getRangeAllFontNames(0, len).map(figma.loadFontAsync)
+ *    Current approach: we pre-load Inter Regular + Bold since the template
+ *    exclusively uses Inter. If the template ever uses other fonts, switch
+ *    to getRangeAllFontNames to avoid sandbox deadlocks.
+ *
+ * 2. POSTMESSAGE RATE — Sending many figma.ui.postMessage() calls in a
+ *    tight async loop can overwhelm the sandbox ↔ iframe channel. During
+ *    debugging, 50+ postMessage calls in <500ms correlated with hangs.
+ *    Use console.log for diagnostics instead of postMessage-based relay.
+ *
+ * 3. DYNAMIC PAGES — Cloned pages require page.loadAsync() before their
+ *    children are accessible. Always call loadAsync() after clone and
+ *    before traversing. Without it, children array may be empty.
+ *    Ref: https://developers.figma.com/docs/plugins/migrating-to-dynamic-loading
+ *
+ * 4. NORMALIZELAYOUT BUDGET — The 6-phase normalizeLayout system traverses
+ *    140+ nodes (840+ visits). Running it AFTER applyNodeMapping (which
+ *    already traverses + modifies all text nodes) exhausts the Figma API
+ *    budget and causes the plugin to hang. Only run normalizeLayout when
+ *    applyNodeMapping was NOT used (i.e. placeholder fallback path).
+ *
+ * 5. SETTIMEOUT / PROMISE.RACE — The Figma plugin sandbox does not
+ *    reliably support setTimeout-based timeout wrappers around Figma API
+ *    calls. Using Promise.race(figmaCall, timeout) causes deadlocks.
+ *    Never wrap figma.loadFontAsync or similar in a timeout.
+ *
+ * Tagged console logs: [Sync], [Fonts], [Map], [Style], [Layout]
+ * These appear in Figma's dev console (Plugins → Development → Open console).
+ * ═══════════════════════════════════════════════════════════════════
  */
 import { runExportComments } from './exportComments'
 
@@ -16,7 +55,7 @@ interface QueuedJob {
   experimentPageName: string
   briefingPayload: BriefingPayload
   mondayItemId?: string
-  /** Pre-computed node name ÔåÆ value; applied by node.name when present */
+  /** Pre-computed node name ├ö├Ñ├å value; applied by node.name when present */
   nodeMapping?: Array<{ nodeName: string; value: string }>
   /** Pre-computed frame renames */
   frameRenames?: Array<{ oldName: string; newName: string }>
@@ -75,27 +114,13 @@ function getPlaceholderValue(placeholderId: string, briefing: BriefingPayload): 
 }
 
 async function loadFontsForTextNode(textNode: TextNode): Promise<void> {
-  var len = textNode.characters.length
-  if (len === 0) {
-    // Empty node: load the single font
-    var font = textNode.fontName as FontName
-    if (font && font.family) {
-      await figma.loadFontAsync(font)
-    }
-    return
-  }
-  // Load all fonts used across the text range (mixed fonts possible)
-  var loaded = new Set<string>()
-  for (var c = 0; c < len; c++) {
-    var f = textNode.getRangeFontName(c, c + 1) as FontName
-    if (f && f.family) {
-      var key = f.family + ':' + f.style
-      if (!loaded.has(key)) {
-        loaded.add(key)
-        await figma.loadFontAsync(f)
-      }
-    }
-  }
+  // Pre-load only the two fonts our template uses. This avoids per-character
+  // scanning (getRangeFontName loop) which caused sandbox deadlocks on
+  // complex template nodes. If the template ever adds non-Inter fonts,
+  // switch to: await Promise.all(node.getRangeAllFontNames(0, len).map(figma.loadFontAsync))
+  // See KNOWN CONSTRAINTS #1 at top of file.
+  await figma.loadFontAsync(TEMPLATE_FONT as FontName)
+  await figma.loadFontAsync(TEMPLATE_FONT_BOLD as FontName)
 }
 
 async function fillTextNodes(node: BaseNode, briefing: BriefingPayload): Promise<void> {
@@ -117,7 +142,9 @@ async function fillTextNodes(node: BaseNode, briefing: BriefingPayload): Promise
           textNode.textAutoResize = 'HEIGHT'
         }
         await styleFilledContent(textNode)
-      } catch (_) {}
+      } catch (e) {
+        console.warn('[Fonts] fillTextNodes failed for', textNode.name, ':', e instanceof Error ? e.message : e)
+      }
     }
     return
   }
@@ -365,6 +392,13 @@ async function applyNodeMapping(
     if (value !== undefined) {
       const normalizedName = normalizeTextKey(textNode.name || '')
       const normalizedChars = normalizeTextKey(textNode.characters || '')
+      // VARIANTS header guard: the mapping agent sends variant count or
+      // full markdown as the value for the "VARIANTS" node, but in Figma
+      // this node is just the section header label — it must always read
+      // "VARIANTS". The actual variant content lives in separate blocks below.
+      if ((normalizedName === 'variants' || normalizedChars === 'variants') && value.trim().toUpperCase() !== 'VARIANTS') {
+        value = 'VARIANTS'
+      }
       const isLabelPointer =
         LABEL_POINTER_KEYS.has(normalizedName) || LABEL_POINTER_KEYS.has(normalizedChars)
       const targetNode: TextNode = isLabelPointer
@@ -383,7 +417,11 @@ async function applyNodeMapping(
         }
         await styleFilledContent(targetNode)
         mappedCount += 1
-      } catch (_) {}
+      } catch (e) {
+        // Log instead of swallowing — silent catches here previously masked
+        // font-loading and sandbox crashes that caused the entire sync to hang.
+        console.warn('[Map] Failed to write node', targetNode.name, ':', e instanceof Error ? e.message : e)
+      }
     }
     return mappedCount
   }
@@ -623,9 +661,15 @@ async function ensureBoldFont(): Promise<boolean> {
 
 /**
  * Style filled content with two-tier typography:
- *   - Label prefixes (text before ':' on each line) ÔåÆ Bold, larger
- *   - Value text (everything else) ÔåÆ Regular, smaller
+ *   - Label prefixes (text before ':' on each line) → Bold, larger
+ *   - Value text (everything else) → Regular, smaller
  * Gracefully degrades if Bold font is unavailable (only adjusts size).
+ *
+ * Uses getSubLabelPrefixLength/getPrimaryLabelPrefixLength (structural
+ * classifiers) instead of a single KNOWN_LABELS regex. This approach is
+ * more maintainable when Monday briefing templates evolve — new headings
+ * are automatically detected by the ALL-CAPS-colon pattern instead of
+ * requiring regex updates.
  */
 async function styleFilledContent(textNode: TextNode): Promise<void> {
   const text = textNode.characters
@@ -642,31 +686,50 @@ async function styleFilledContent(textNode: TextNode): Promise<void> {
   textNode.setRangeFontSize(0, len, CONTENT_FONT_SIZE)
   textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: CONTENT_FONT_SIZE + 5 })
 
-  // Three-tier typography: primary labels (14px Bold), sub-headers (12px Bold), content (12px Regular).
-  const KNOWN_LABELS = /^(IDEA:|WHY:|AUDIENCE\/REGION:|SEGMENT:|FORMATS:|VARIANTS:|Product:|Visual:|Copy:|Copy info:|Note:|Test:|headline:|subline:|CTA:|[A-D]\s*-\s*(?:Video|Image|Static|Carousel|[A-Za-z]+):)/i
-  const SUB_LABELS = /^(Input visual \+ copy direction:|Script:)/i
+  // Structural classifier: primary labels, sub-labels, content.
   const lines = text.split('\n')
   let offset = 0
   for (const line of lines) {
-    const subM = SUB_LABELS.exec(line)
-    const labelM = KNOWN_LABELS.exec(line)
-    if (subM) {
-      const labelEnd = offset + subM[1].length
+    const subLen = getSubLabelPrefixLength(line)
+    const primaryLen = subLen === 0 ? getPrimaryLabelPrefixLength(line) : 0
+    if (subLen > 0) {
+      const labelEnd = offset + subLen
       if (hasBold) {
         textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD as FontName)
       }
       textNode.setRangeFontSize(offset, labelEnd, SUB_LABEL_FONT_SIZE)
       textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: SUB_LABEL_FONT_SIZE + 5 })
-    } else if (labelM) {
-      const labelEnd = offset + labelM[1].length
+    } else if (primaryLen > 0) {
+      const labelEnd = offset + primaryLen
       if (hasBold) {
         textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD as FontName)
       }
       textNode.setRangeFontSize(offset, labelEnd, LABEL_FONT_SIZE)
       textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 })
     }
-    offset += line.length + 1 // +1 for the \n
+    offset += line.length + 1
   }
+}
+
+/** Sub-label prefix length (Input visual + copy direction:, Script:, Copy:) for structural typography. */
+function getSubLabelPrefixLength(line: string): number {
+  const t = line.trimStart()
+  if (t.startsWith('Input visual + copy direction:')) return line.length - t.length + 'Input visual + copy direction:'.length
+  if (/^Script:\s*/i.test(t)) return line.length - t.length + (t.match(/^Script:\s*/i)?.[0].length ?? 0)
+  if (/^Copy:\s*/i.test(t)) return line.length - t.length + (t.match(/^Copy:\s*/i)?.[0].length ?? 0)
+  return 0
+}
+
+/** Primary label prefix length: section headings (ALL CAPS:), variant titles (A - X), copy-card labels. */
+function getPrimaryLabelPrefixLength(line: string): number {
+  const t = line.trimStart()
+  const variantMatch = t.match(/^([A-D]\s*-\s*[A-Za-z0-9\s]+?)(?:\s|$)/i)
+  if (variantMatch) return line.length - t.length + variantMatch[1].length
+  const sectionMatch = t.match(/^([A-Z][A-Z0-9\/\s]*:)\s*/)
+  if (sectionMatch) return line.length - t.length + sectionMatch[1].length
+  const copyCardMatch = t.match(/^(headline:|subline:|CTA:|Note:)\s*/i)
+  if (copyCardMatch) return line.length - t.length + copyCardMatch[1].length
+  return 0
 }
 
 /**
@@ -832,7 +895,7 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   appendAndStretch(nameBlock, nameText)
   appendAndStretch(briefingCol, nameBlock)
 
-  // Single flexible "Briefing Content" block — full body from Monday doc (IDEA through Testing/Notes)
+  // Single flexible "Briefing Content" block ÔÇö full body from Monday doc (IDEA through Testing/Notes)
   const briefingContentPlaceholder = [
     'IDEA:',
     'Your core creative idea.',
@@ -970,7 +1033,7 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   uploadsGallery.resize(uploadsW, 60 * S)
   appendAndStretch(uploadsCol, uploadsGallery)
 
-  // Placeholder text ÔÇö removed automatically when images are imported
+  // Placeholder text ├ö├ç├Â removed automatically when images are imported
   const uploadsPlaceholder = makeTextNode('Uploads Placeholder', 'Images from Monday will appear here', font)
   uploadsPlaceholder.fontSize = 10 * S
   uploadsPlaceholder.fills = [solidPaint(0.6, 0.6, 0.6)]
@@ -1026,7 +1089,7 @@ interface LayoutAnalysis {
  */
 function detectChildArrangement(frame: FrameNode): 'VERTICAL' | 'HORIZONTAL' | 'NONE' {
   const kids = frame.children.filter((c) => (c as SceneNode).visible !== false) as SceneNode[]
-  if (kids.length < 2) return 'VERTICAL' // single child ÔåÆ treat as vertical
+  if (kids.length < 2) return 'VERTICAL' // single child ├ö├Ñ├å treat as vertical
 
   // Check vertical stacking: each child starts at/below previous bottom
   const sortedY = [...kids].sort((a, b) => a.y - b.y)
@@ -1165,7 +1228,7 @@ function phaseEnableAutoLayout(node: BaseNode, analysis: LayoutAnalysis): void {
 
   // Sort children to match visual order before enabling auto-layout.
   // In Figma, auto-layout flows children in array order; we need
-  // that order to match the visual topÔåÆbottom / leftÔåÆright order.
+  // that order to match the visual top├ö├Ñ├åbottom / left├ö├Ñ├åright order.
   const sorted = [...frame.children].sort((a, b) =>
     arrangement === 'VERTICAL'
       ? (a as SceneNode).y - (b as SceneNode).y
@@ -1200,9 +1263,9 @@ function phaseEnableAutoLayout(node: BaseNode, analysis: LayoutAnalysis): void {
  * Phase 3: For frames already with auto-layout, ensure they hug content.
  *
  * VERTICAL frames: primaryAxis (height) = AUTO, counterAxis (width) = FIXED
- *   ÔåÆ grows vertically with children, keeps fixed column width
+ *   ├ö├Ñ├å grows vertically with children, keeps fixed column width
  * HORIZONTAL frames: primaryAxis (width) = AUTO, counterAxis (height) = AUTO
- *   ÔåÆ grows horizontally with children AND vertically to match tallest child
+ *   ├ö├Ñ├å grows horizontally with children AND vertically to match tallest child
  *
  * This ensures the Columns row expands to show the full Briefing column.
  */
@@ -1241,7 +1304,7 @@ function phaseStretchChildren(node: BaseNode): number {
   let count = 0
   if (node.type === 'FRAME') {
     const frame = node as FrameNode
-    // Only stretch in VERTICAL layouts ÔÇö makes children fill width.
+    // Only stretch in VERTICAL layouts ├ö├ç├Â makes children fill width.
     // In HORIZONTAL layouts, children keep their own width.
     if (frame.layoutMode === 'VERTICAL') {
       for (let i = 0; i < frame.children.length; i++) {
@@ -1307,7 +1370,7 @@ const TEMPLATE_SUB_LABELS = new Set(['input visual + copy direction:', 'script:'
 
 /**
  * Phase 6: Style unfilled template labels as Bold + larger.
- * Primary labels ÔåÆ 14px Bold; sub-headers (Input visual + copy direction:, Script:) ÔåÆ 12px Bold.
+ * Primary labels ├ö├Ñ├å 14px Bold; sub-headers (Input visual + copy direction:, Script:) ├ö├Ñ├å 12px Bold.
  */
 async function phaseStyleTemplateLabels(node: BaseNode): Promise<number> {
   let count = 0
@@ -1340,12 +1403,12 @@ async function phaseStyleTemplateLabels(node: BaseNode): Promise<number> {
  * Six-phase process that runs after content fill to ensure
  * all components scale proportionally with their content.
  *
- * Phase 1 ÔÇö Text: auto-resize HEIGHT on all text nodes (vertical growth)
- * Phase 2 ÔÇö Frames: detect stacked patterns, enable auto-layout (bottom-up)
- * Phase 3 ÔÇö Hug: ensure all auto-layout frames grow with children (both axes)
- * Phase 4 ÔÇö Stretch: children fill parent width (no more 100px cramming)
- * Phase 5 ÔÇö Unclip: disable clipsContent so nothing is hidden
- * Phase 6 ÔÇö Style: bold template labels, sized content text
+ * Phase 1 ├ö├ç├Â Text: auto-resize HEIGHT on all text nodes (vertical growth)
+ * Phase 2 ├ö├ç├Â Frames: detect stacked patterns, enable auto-layout (bottom-up)
+ * Phase 3 ├ö├ç├Â Hug: ensure all auto-layout frames grow with children (both axes)
+ * Phase 4 ├ö├ç├Â Stretch: children fill parent width (no more 100px cramming)
+ * Phase 5 ├ö├ç├Â Unclip: disable clipsContent so nothing is hidden
+ * Phase 6 ├ö├ç├Â Style: bold template labels, sized content text
  */
 async function normalizeLayout(root: BaseNode): Promise<LayoutAnalysis> {
   const analysis: LayoutAnalysis = {
@@ -1356,13 +1419,13 @@ async function normalizeLayout(root: BaseNode): Promise<LayoutAnalysis> {
     skippedFrames: [],
   }
 
-  // Phase 1: text nodes ÔÇö must be first so heights settle
+  // Phase 1: text nodes ├ö├ç├Â must be first so heights settle
   analysis.textNodesFixed = await phaseFixTextNodes(root)
 
   // Phase 2: bottom-up auto-layout on stacked frames
   phaseEnableAutoLayout(root, analysis)
 
-  // Phase 3: existing auto-layout frames ÔåÆ hug content on both axes
+  // Phase 3: existing auto-layout frames ├ö├Ñ├å hug content on both axes
   phaseEnsureHugContent(root, analysis)
 
   // Phase 4: stretch children to fill parent width
@@ -1396,8 +1459,8 @@ var debugLog: DebugEntry[] = []
 // =====================================================
 // After text sync, images from Monday briefings are imported
 // into the "Uploads" column of each experiment page.
-// Flow: main thread ÔåÆ "fetch-images" ÔåÆ UI iframe fetches bytes
-//       UI ÔåÆ "image-data" ÔåÆ main thread places in Figma
+// Flow: main thread ├ö├Ñ├å "fetch-images" ├ö├Ñ├å UI iframe fetches bytes
+//       UI ├ö├Ñ├å "image-data" ├ö├Ñ├å main thread places in Figma
 // =====================================================
 
 /**
@@ -1572,6 +1635,7 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
 
 async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: string; experimentPageName: string; pageId: string; fileUrl: string; error?: string }>> {
   debugLog = []
+  console.log('[Sync] processJobs START:', jobs.length, 'jobs:', jobs.map(j => j.experimentPageName).join(', '))
   var root = figma.root
   var children = root.children || []
   var templatePage: PageNode | null = null
@@ -1588,13 +1652,14 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
     if (templatePage) break
   }
 
-  // Ensure template page is loaded (documentAccess: dynamic-page).
-  // If the user is on a different page, accessing template children or cloning can yield empty pages.
+  // See KNOWN CONSTRAINTS #3: dynamic pages require loadAsync() before
+  // children are accessible. Without this, cloned pages have empty children.
   if (templatePage && typeof (templatePage as any).loadAsync === 'function') {
     try {
       await (templatePage as any).loadAsync()
-    } catch (_) {}
+    } catch (e) { console.warn('[Sync] template loadAsync failed:', e) }
   }
+  console.log('[Sync] Template:', templatePage ? templatePage.name : 'NOT FOUND')
 
   if (!templatePage) {
     return jobs.map(function (job) {
@@ -1607,6 +1672,8 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
 
   for (var i = 0; i < jobs.length; i++) {
     var job = jobs[i]
+    figma.ui.postMessage({ type: 'progress', current: i + 1, total: jobs.length, name: job.experimentPageName })
+    console.log('[Sync] Job', (i + 1) + '/' + jobs.length + ':', job.experimentPageName, '— mapping entries:', (job.nodeMapping || []).length)
     try {
       var briefing = job.briefingPayload as BriefingPayload
       var targetPage: PageNode | null = null
@@ -1625,10 +1692,11 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
         createdNew = true
       }
 
-      // Ensure the target page is loaded before traversing/modifying it (dynamic-page).
+      // See KNOWN CONSTRAINTS #3: must loadAsync() before traversing cloned page.
       if (targetPage && typeof (targetPage as any).loadAsync === 'function') {
-        try { await (targetPage as any).loadAsync() } catch (_) {}
+        try { await (targetPage as any).loadAsync() } catch (e) { console.warn('[Sync] target page loadAsync failed:', e) }
       }
+      console.log('[Sync] Page ready:', targetPage.name, '— created:', createdNew, '— children:', targetPage.children.length)
 
       targetPage.setPluginData('heimdallIdempotencyKey', job.idempotencyKey)
       targetPage.setPluginData('heimdallMondayItemId', job.mondayItemId || '')
@@ -1681,9 +1749,9 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
             value: val,
           })
         }
+        console.log('[Map] applyNodeMapping START:', mappingEntries.length, 'entries, root:', (contentRoot as any).name || contentRoot.type)
         var mappedCount = await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice())
-        // Fallback when mapping keys don't match the current template.
-        // This avoids creating empty pages when applyNodeMapping writes nothing.
+        console.log('[Map] applyNodeMapping DONE:', mappedCount, 'nodes mapped')
         if (mappedCount === 0) {
           await fillTextNodes(contentRoot, briefing)
           usedPlaceholderFallback = true
@@ -1698,13 +1766,13 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
         await fillTextNodes(contentRoot, briefing)
       }
 
-      // ÔöÇÔöÇ Smart Layout Normalization ÔöÇÔöÇ
-      // Skip when mapping was used ÔÇö applyNodeMapping + styleFilledContent
-      // already handle typography. The 6-phase normalizeLayout re-traverses
-      // 140+ nodes (840+ visits total) which exhausts the Figma API after
-      // the heavy applyNodeMapping pass and causes the plugin to hang.
+      // See KNOWN CONSTRAINTS #4: normalizeLayout (6 phases, 840+ node
+      // visits) will hang the plugin if run after applyNodeMapping already
+      // modified all text nodes. Only run it on the placeholder fallback path.
       if (!hasMapping || usedPlaceholderFallback) {
+        console.log('[Layout] normalizeLayout START (fallback path)')
         var layoutResult = await normalizeLayout(contentRoot)
+        console.log('[Layout] normalizeLayout DONE:', layoutResult.textNodesFixed, 'text fixed,', layoutResult.framesConverted, 'frames converted')
         debugLog.push({
           nodeName: '__LAYOUT_NORM__',
           chars: 'textFixed=' + layoutResult.textNodesFixed
@@ -1720,11 +1788,17 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       var pageId = targetPage.id
       var fileUrl = 'https://www.figma.com/file/' + fileKey + '?node-id=' + encodeURIComponent(pageId.replace(':', '-'))
       results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: pageId, fileUrl: fileUrl })
+      console.log('[Sync] Job', (i + 1) + '/' + jobs.length, 'DONE:', job.experimentPageName)
     } catch (e) {
-      results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: '', fileUrl: '', error: (e instanceof Error ? e.message : 'Unknown error') })
+      var errMsg = e instanceof Error ? e.message : 'Unknown error'
+      console.error('[Sync] Job', (i + 1) + '/' + jobs.length, 'FAILED:', job.experimentPageName, '—', errMsg)
+      results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: '', fileUrl: '', error: errMsg })
     }
   }
 
+  var okCount = results.filter(function (r) { return !r.error }).length
+  var failCount = results.filter(function (r) { return !!r.error }).length
+  console.log('[Sync] processJobs END:', okCount, 'ok,', failCount, 'failed, total:', results.length)
   return results
 }
 
@@ -1733,9 +1807,10 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
 var uiHtml = '<html><head><style>'
   + 'body{font-family:Inter,sans-serif;padding:12px;margin:0;}'
   + 'h3{margin:0 0 8px 0;font-size:13px;}'
-  + '.tabs{display:flex;gap:8px;margin:0 0 8px 0;}'
-  + '.tab{padding:7px 10px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;cursor:pointer;font-size:11px;}'
-  + '.tab.active{background:#0d99ff;color:#fff;border-color:#0d99ff;}'
+  + '.tabs{display:flex;gap:0;margin:0 0 10px 0;border-bottom:1px solid #ddd;}'
+  + '.tab{width:auto!important;padding:8px 12px;border:none!important;border-radius:0!important;border-bottom:2px solid transparent!important;background:transparent!important;color:#666!important;cursor:pointer;font-size:11px;font-weight:600;}'
+  + '.tab:hover{background:#f6f7f9!important;color:#222!important;}'
+  + '.tab.active{background:transparent!important;color:#111!important;border-bottom-color:#0d99ff!important;}'
   + '.row{display:flex;gap:8px;align-items:center;margin:8px 0;}'
   + '.label{font-size:11px;color:#555;min-width:68px;}'
   + 'input{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;}'
@@ -1883,15 +1958,13 @@ var uiHtml = '<html><head><style>'
   + '      queuedJobIds = (data.jobs || []).map(function(j){ return j.id; });'
   + '      document.getElementById("msg").textContent = "Queued " + (data.queued || 0) + ". Fetching jobs...";'
   + '      var q = "";'
-  + '      if (fileKey) q = "fileKey=" + encodeURIComponent(fileKey);'
+  + '      if (queuedJobIds.length > 0) q = "ids=" + queuedJobIds.map(function(id){ return encodeURIComponent(id); }).join(",");'
+  + '      else if (fileKey) q = "fileKey=" + encodeURIComponent(fileKey);'
   + '      else if (items.length > 0 && items[0].batch) q = "batch=" + encodeURIComponent(items[0].batch);'
   + '      return fetch(HEIMDALL_API + "/api/jobs/queued" + (q ? ("?" + q) : "")).then(function(r2){ return r2.json(); });'
   + '    })'
   + '    .then(function(data2) {'
   + '      var jobs = (data2 && data2.jobs) ? data2.jobs : [];'
-  + '      if (queuedJobIds.length > 0) {'
-  + '        jobs = jobs.filter(function(j){ return queuedJobIds.indexOf(j.id) >= 0; });'
-  + '      }'
   + '      if (jobs.length === 0) { document.getElementById("msg").textContent = "No jobs returned. Try again in a moment."; isSyncing = false; document.getElementById("sync").disabled = false; return; }'
   + '      document.getElementById("msg").textContent = "Creating " + jobs.length + " page(s)...";'
   + '      parent.postMessage({ pluginMessage: { type: "process-jobs", jobs: jobs } }, "*");'
@@ -1996,6 +2069,9 @@ var uiHtml = '<html><head><style>'
   + '  }'
   + '  if (d.type === "file-key") {'
   + '    fetchJobs(d.fileKey);'
+  + '  }'
+  + '  if (d.type === "progress") {'
+  + '    document.getElementById("msg").textContent = "Creating page " + d.current + "/" + d.total + ": " + (d.name || "");'
   + '  }'
   + '  if (d.type === "jobs-processed") {'
   + '    reportResults(d.results);'

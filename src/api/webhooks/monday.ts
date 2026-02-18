@@ -290,7 +290,7 @@ export async function handleMondayWebhook(body: MondayWebhookPayload): Promise<{
 export async function queueMondayItem(
   boardId: string,
   itemId: string,
-  options?: { idempotencySuffix?: string }
+  options?: { idempotencySuffix?: string; disableAiMapping?: boolean }
 ): Promise<{
   outcome: string
   message: string
@@ -336,6 +336,7 @@ export async function queueMondayItem(
       const mondayDocContent = qDocId ? await getDocContent(qDocId) : null
       const mapping = await computeNodeMapping(item, tree, {
         mondayDocContent: mondayDocContent ?? undefined,
+        disableAi: options?.disableAiMapping === true,
       })
       nodeMapping = mapping.textMappings
       frameRenames = mapping.frameRenames

@@ -1,18 +1,29 @@
 import { NextResponse } from 'next/server'
-import { getAllJobs, getJobsByFileKey, getJobsByBatch } from '@/lib/kv'
+import { getAllJobs, getJobsByFileKey, getJobsByBatch, getJobById } from '@/lib/kv'
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
+    const idsParam = searchParams.get('ids')
     const fileKey = searchParams.get('fileKey') ?? searchParams.get('file_key')
     const batch = searchParams.get('batchCanonical') ?? searchParams.get('batch')
-    
-    const allJobs = fileKey
-      ? await getJobsByFileKey(fileKey)
-      : batch
-        ? await getJobsByBatch(batch)
-        : await getAllJobs()
-    
+
+    const allJobs = idsParam
+      ? (
+          await Promise.all(
+            idsParam
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .map((id) => getJobById(id))
+          )
+        ).filter((j): j is NonNullable<typeof j> => j !== null)
+      : fileKey
+        ? await getJobsByFileKey(fileKey)
+        : batch
+          ? await getJobsByBatch(batch)
+          : await getAllJobs()
+
     // Only return queued jobs — plugin should not re-process completed/failed ones
     const jobs = allJobs.filter((j) => j.state === 'queued')
 
