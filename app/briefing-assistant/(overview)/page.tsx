@@ -160,11 +160,12 @@ function BriefingOverviewContent() {
   }
 
   return (
-    <main className="flex-1 min-h-0 overflow-auto flex flex-col">
-      <div className="border-b border-border bg-card/40 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">
-          Briefing Assistant
-        </h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Briefing Assistant</h1>
+          <p className="text-muted-foreground">Manage sprints, batches, and briefing assignments</p>
+        </div>
         <Button size="sm" onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4" />
           <span className="ml-2">New sprint</span>
@@ -281,7 +282,7 @@ function BriefingOverviewContent() {
         </div>
       ) : null}
 
-      <div className="flex-1 overflow-auto p-6">
+      <div>
         {sprints.length === 0 ? (
           <div className="max-w-lg mx-auto text-center py-16">
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 text-primary mb-4 mx-auto">
@@ -297,7 +298,7 @@ function BriefingOverviewContent() {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-5xl">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sprints.map((sprint) => (
               <Link
                 key={sprint.id}
@@ -342,7 +343,7 @@ function BriefingOverviewContent() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   )
 }
 

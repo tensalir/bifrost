@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, ArrowLeft, FileText } from 'lucide-react'
+import { Nav } from '@/components/nav'
 
 interface FigmaFile {
   key: string
@@ -57,7 +58,7 @@ function FileCard({
   )
 }
 
-export default function ProjectFilesPage() {
+function ProjectFilesContent() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -92,23 +93,18 @@ export default function ProjectFilesPage() {
   }, [fetchFiles])
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      <header className="shrink-0 border-b border-border bg-card/40 px-4 py-3 flex items-center gap-3">
+    <div className="space-y-6">
+      <div>
         <Link
           href="/sheets"
-          className="shrink-0 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          Feedback Summarizer
         </Link>
-        <h1 className="text-sm font-medium text-foreground truncate">{projectName}</h1>
-      </header>
-
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <p className="text-sm text-muted-foreground mb-6">
-            Select a file to view and consolidate Figma comments.
-          </p>
+        <h1 className="text-2xl font-bold tracking-tight">{projectName}</h1>
+        <p className="text-muted-foreground">Select a file to view and consolidate Figma comments</p>
+      </div>
 
           {loading ? (
             <div className="flex items-center justify-center py-16">
@@ -134,8 +130,19 @@ export default function ProjectFilesPage() {
               ))}
             </div>
           )}
+    </div>
+  )
+}
+
+export default function ProjectFilesPage() {
+  return (
+    <div className="flex min-h-screen">
+      <Nav />
+      <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <div className="mx-auto max-w-7xl">
+          <ProjectFilesContent />
         </div>
-      </div>
+      </main>
     </div>
   )
 }

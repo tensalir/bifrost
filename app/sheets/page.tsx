@@ -101,40 +101,40 @@ function SheetsOverviewContent() {
   const latestRound = rounds.length > 0 ? rounds[0] : null
 
   return (
-    <main className="flex-1 min-h-0 overflow-auto flex flex-col">
-      <div className="border-b border-border bg-card/40 px-6 py-3 flex items-center gap-6">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">
-          Feedback
-        </h1>
-        <div className="flex gap-0 rounded-lg p-0.5 bg-muted/50">
-          <button
-            onClick={() => setTab('figma')}
-            className={cn(
-              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-              activeTab === 'figma'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Figma Comments
-          </button>
-          <button
-            onClick={() => setTab('stakeholder')}
-            className={cn(
-              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
-              activeTab === 'stakeholder'
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            Stakeholder Feedback
-          </button>
-        </div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Feedback Summarizer</h1>
+        <p className="text-muted-foreground">View and consolidate Figma comments and stakeholder feedback</p>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex gap-0 rounded-lg p-0.5 bg-muted/50 w-fit">
+        <button
+          onClick={() => setTab('figma')}
+          className={cn(
+            'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+            activeTab === 'figma'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Figma Comments
+        </button>
+        <button
+          onClick={() => setTab('stakeholder')}
+          className={cn(
+            'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+            activeTab === 'stakeholder'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Stakeholder Feedback
+        </button>
+      </div>
+
+      <div>
         {activeTab === 'figma' && (
-          <div className="max-w-6xl mx-auto px-6 py-8">
+          <div>
             {figmaLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -170,7 +170,7 @@ function SheetsOverviewContent() {
         )}
 
         {activeTab === 'stakeholder' && (
-          <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+          <div className="space-y-6">
             {roundsLoading ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -205,7 +205,7 @@ function SheetsOverviewContent() {
           </div>
         )}
       </div>
-    </main>
+    </div>
   )
 }
 
@@ -215,9 +215,13 @@ function SheetsOverviewContent() {
 
 function SheetsOverviewPage() {
   return (
-    <div className="h-full flex overflow-hidden bg-background">
+    <div className="flex min-h-screen">
       <Nav />
-      <SheetsOverviewContent />
+      <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <div className="mx-auto max-w-7xl">
+          <SheetsOverviewContent />
+        </div>
+      </main>
     </div>
   )
 }

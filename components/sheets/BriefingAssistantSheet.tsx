@@ -4,8 +4,6 @@ import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   Loader2,
   LayoutGrid,
@@ -75,7 +73,6 @@ export function BriefingAssistantSheet({
   initialAssignments,
   onSprintUpdated,
 }: BriefingAssistantSheetProps = {}) {
-  const [previewPanelOpen, setPreviewPanelOpen] = useState(true)
   const [splitResult, setSplitResult] = useState<SplitOutput | null>(null)
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -382,12 +379,9 @@ export function BriefingAssistantSheet({
     <div className="h-full flex flex-col bg-background text-foreground">
 
       {/* ── Top toolbar: spans above both panels ── */}
-      <div className="flex-shrink-0 flex items-start px-4 pt-3 pb-2">
-        {/* Left: back + title (occupies same width as left panel below) */}
-        <div className={cn(
-          'flex items-center gap-2 shrink-0 pt-2 transition-all duration-300',
-          previewPanelOpen ? 'w-[525px]' : 'w-auto'
-        )}>
+      <div className="flex-shrink-0 flex items-center px-4 pt-3 pb-2 gap-4">
+        {/* Left: back + title (width matches left panel below) */}
+        <div className="flex items-center gap-2 shrink-0 w-[476px]">
           <Link
             href={sprintId ? '/briefing-assistant' : '/sheets'}
             className="flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors shrink-0"
@@ -417,7 +411,7 @@ export function BriefingAssistantSheet({
           </div>
         </div>
 
-        {/* Right-aligned: Product & Data Sources + Generate + data actions */}
+        {/* Product & Data Sources + Generate + data actions */}
         <div className="flex items-center gap-3 flex-wrap flex-1 min-w-0">
           <BriefingGeneratorPanel
             onGenerate={async (product, datasources) => {
@@ -591,16 +585,10 @@ export function BriefingAssistantSheet({
       ) : null}
 
       <div className="flex flex-1 min-h-0 px-4 pb-4 pt-1 gap-3">
-        {/* Left panel: detached card surface */}
-        <div
-          className={cn(
-            'flex-shrink-0 overflow-hidden rounded-lg border border-border bg-card shadow-sm flex flex-col transition-all duration-300 ease-in-out',
-            previewPanelOpen ? 'w-[480px]' : 'w-0'
-          )}
-        >
+        {/* Left panel: detached card surface (always open) */}
+        <div className="flex-shrink-0 w-[480px] overflow-hidden rounded-lg border border-border bg-card shadow-sm flex flex-col">
           <aside className="flex-1 flex flex-col min-h-0 bg-primary/[0.03] pt-4 pb-4 px-4">
-            {previewPanelOpen ? (
-              <BriefingWorkingDocPanel
+            <BriefingWorkingDocPanel
               assignmentId={selected?.id ?? null}
               briefName={selected?.briefName}
               sections={selected?.workingDocSections}
@@ -619,22 +607,8 @@ export function BriefingAssistantSheet({
                 }
               } : undefined}
             />
-          ) : null}
           </aside>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setPreviewPanelOpen((v) => !v)}
-          className="flex-shrink-0 flex items-center justify-center w-5 rounded hover:bg-muted/40 transition-colors text-muted-foreground/40 hover:text-muted-foreground/70"
-          aria-label={previewPanelOpen ? 'Hide working doc' : 'Show working doc'}
-        >
-          {previewPanelOpen ? (
-            <ChevronLeft className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
-        </button>
 
         <div className="flex flex-col flex-1 min-w-0 rounded-lg border border-border bg-card shadow-sm overflow-hidden">
           <BriefingAssignmentsTable
