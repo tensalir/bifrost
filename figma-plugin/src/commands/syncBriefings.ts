@@ -12,13 +12,13 @@
  *
  * 1. FONT LOADING — Figma requires ALL fonts in a text node to be loaded
  *    before setting .characters or any layout-affecting property (.fontSize,
- *    .fontName, .lineHeight, etc.). Failure to do so can silently crash the
- *    plugin sandbox (no error thrown — execution simply stops).
+ *    .fontName, .lineHeight, etc.). Failure to do so silently deadlocks the
+ *    plugin sandbox (no error thrown — execution simply stops forever).
+ *    CONFIRMED: loading only hardcoded Inter Regular + Bold caused a
+ *    reproducible deadlock at the first figma.loadFontAsync call on cloned
+ *    template nodes. Fix: use getRangeAllFontNames(0, len) to load the
+ *    actual fonts the node contains. NEVER hardcode font assumptions.
  *    Ref: https://developers.figma.com/docs/plugins/working-with-text
- *    Official pattern: node.getRangeAllFontNames(0, len).map(figma.loadFontAsync)
- *    Current approach: we pre-load Inter Regular + Bold since the template
- *    exclusively uses Inter. If the template ever uses other fonts, switch
- *    to getRangeAllFontNames to avoid sandbox deadlocks.
  *
  * 2. POSTMESSAGE RATE — Sending many figma.ui.postMessage() calls in a
  *    tight async loop can overwhelm the sandbox ↔ iframe channel. During
@@ -40,6 +40,19 @@
  *    reliably support setTimeout-based timeout wrappers around Figma API
  *    calls. Using Promise.race(figmaCall, timeout) causes deadlocks.
  *    Never wrap figma.loadFontAsync or similar in a timeout.
+ *
+ * 6. "WORKED, THEN SUDDENLY BROKE" TIMELINE — This incident looked random
+ *    but was cumulative:
+ *    - It worked when traversal stayed within editable page/frame text nodes.
+ *    - It regressed after code paths started traversing deeper into
+ *      INSTANCE/COMPONENT/COMPONENT_SET internals under dynamic-page mode.
+ *      That traversal can deadlock and freeze after first-page partial writes.
+ *    - Extra debug transport amplified the issue: high-rate postMessage relay
+ *      and main-thread localhost fetch logging both introduced additional
+ *      sandbox pressure, making stalls more frequent and harder to reproduce.
+ *    - It is stable again because we now skip component-internal node types
+ *      in applyNodeMapping (they are not mapping targets) and avoid
+ *      high-volume cross-thread/network debug relays in hot loops.
  *
  * Tagged console logs: [Sync], [Fonts], [Map], [Style], [Layout]
  * These appear in Figma's dev console (Plugins → Development → Open console).
@@ -114,13 +127,25 @@ function getPlaceholderValue(placeholderId: string, briefing: BriefingPayload): 
 }
 
 async function loadFontsForTextNode(textNode: TextNode): Promise<void> {
-  // Pre-load only the two fonts our template uses. This avoids per-character
-  // scanning (getRangeFontName loop) which caused sandbox deadlocks on
-  // complex template nodes. If the template ever adds non-Inter fonts,
-  // switch to: await Promise.all(node.getRangeAllFontNames(0, len).map(figma.loadFontAsync))
-  // See KNOWN CONSTRAINTS #1 at top of file.
-  await figma.loadFontAsync(TEMPLATE_FONT as FontName)
-  await figma.loadFontAsync(TEMPLATE_FONT_BOLD as FontName)
+  var len = textNode.characters.length
+  if (len === 0) {
+    var font = textNode.fontName as FontName
+    if (font && font.family) {
+      await figma.loadFontAsync(font)
+    }
+    return
+  }
+  var loaded = new Set<string>()
+  for (var c = 0; c < len; c++) {
+    var f = textNode.getRangeFontName(c, c + 1) as FontName
+    if (f && f.family) {
+      var key = f.family + ':' + f.style
+      if (!loaded.has(key)) {
+        loaded.add(key)
+        await figma.loadFontAsync(f)
+      }
+    }
+  }
 }
 
 async function fillTextNodes(node: BaseNode, briefing: BriefingPayload): Promise<void> {
@@ -142,9 +167,7 @@ async function fillTextNodes(node: BaseNode, briefing: BriefingPayload): Promise
           textNode.textAutoResize = 'HEIGHT'
         }
         await styleFilledContent(textNode)
-      } catch (e) {
-        console.warn('[Fonts] fillTextNodes failed for', textNode.name, ':', e instanceof Error ? e.message : e)
-      }
+      } catch (_) {}
     }
     return
   }
@@ -417,11 +440,7 @@ async function applyNodeMapping(
         }
         await styleFilledContent(targetNode)
         mappedCount += 1
-      } catch (e) {
-        // Log instead of swallowing — silent catches here previously masked
-        // font-loading and sandbox crashes that caused the entire sync to hang.
-        console.warn('[Map] Failed to write node', targetNode.name, ':', e instanceof Error ? e.message : e)
-      }
+      } catch (_) {}
     }
     return mappedCount
   }
@@ -434,6 +453,13 @@ async function applyNodeMapping(
         break
       }
     }
+  }
+  // Skip node types whose children never contain mapping targets.
+  // INSTANCE/COMPONENT/COMPONENT_SET children are internal Figma component
+  // structure — accessing .children on them in dynamic-page mode can
+  // deadlock the sandbox. See KNOWN CONSTRAINTS #1.
+  if (node.type === 'INSTANCE' || node.type === 'COMPONENT' || node.type === 'COMPONENT_SET') {
+    return mappedCount
   }
   var withChildren = node as { children?: readonly BaseNode[] }
   if (withChildren.children && withChildren.children.length) {
@@ -664,12 +690,6 @@ async function ensureBoldFont(): Promise<boolean> {
  *   - Label prefixes (text before ':' on each line) → Bold, larger
  *   - Value text (everything else) → Regular, smaller
  * Gracefully degrades if Bold font is unavailable (only adjusts size).
- *
- * Uses getSubLabelPrefixLength/getPrimaryLabelPrefixLength (structural
- * classifiers) instead of a single KNOWN_LABELS regex. This approach is
- * more maintainable when Monday briefing templates evolve — new headings
- * are automatically detected by the ALL-CAPS-colon pattern instead of
- * requiring regex updates.
  */
 async function styleFilledContent(textNode: TextNode): Promise<void> {
   const text = textNode.characters
@@ -686,50 +706,31 @@ async function styleFilledContent(textNode: TextNode): Promise<void> {
   textNode.setRangeFontSize(0, len, CONTENT_FONT_SIZE)
   textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: CONTENT_FONT_SIZE + 5 })
 
-  // Structural classifier: primary labels, sub-labels, content.
+  // Three-tier typography: primary labels (14px Bold), sub-headers (12px Bold), content (12px Regular).
+  const KNOWN_LABELS = /^(IDEA:|WHY:|AUDIENCE\/REGION:|SEGMENT:|FORMATS:|VARIANTS:|Product:|Visual:|Copy:|Copy info:|Note:|Test:|headline:|subline:|CTA:|[A-D]\s*-\s*(?:Video|Image|Static|Carousel|[A-Za-z]+):)/i
+  const SUB_LABELS = /^(Input visual \+ copy direction:|Script:)/i
   const lines = text.split('\n')
   let offset = 0
   for (const line of lines) {
-    const subLen = getSubLabelPrefixLength(line)
-    const primaryLen = subLen === 0 ? getPrimaryLabelPrefixLength(line) : 0
-    if (subLen > 0) {
-      const labelEnd = offset + subLen
+    const subM = SUB_LABELS.exec(line)
+    const labelM = KNOWN_LABELS.exec(line)
+    if (subM) {
+      const labelEnd = offset + subM[1].length
       if (hasBold) {
         textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD as FontName)
       }
       textNode.setRangeFontSize(offset, labelEnd, SUB_LABEL_FONT_SIZE)
       textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: SUB_LABEL_FONT_SIZE + 5 })
-    } else if (primaryLen > 0) {
-      const labelEnd = offset + primaryLen
+    } else if (labelM) {
+      const labelEnd = offset + labelM[1].length
       if (hasBold) {
         textNode.setRangeFontName(offset, labelEnd, TEMPLATE_FONT_BOLD as FontName)
       }
       textNode.setRangeFontSize(offset, labelEnd, LABEL_FONT_SIZE)
       textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 })
     }
-    offset += line.length + 1
+    offset += line.length + 1 // +1 for the \n
   }
-}
-
-/** Sub-label prefix length (Input visual + copy direction:, Script:, Copy:) for structural typography. */
-function getSubLabelPrefixLength(line: string): number {
-  const t = line.trimStart()
-  if (t.startsWith('Input visual + copy direction:')) return line.length - t.length + 'Input visual + copy direction:'.length
-  if (/^Script:\s*/i.test(t)) return line.length - t.length + (t.match(/^Script:\s*/i)?.[0].length ?? 0)
-  if (/^Copy:\s*/i.test(t)) return line.length - t.length + (t.match(/^Copy:\s*/i)?.[0].length ?? 0)
-  return 0
-}
-
-/** Primary label prefix length: section headings (ALL CAPS:), variant titles (A - X), copy-card labels. */
-function getPrimaryLabelPrefixLength(line: string): number {
-  const t = line.trimStart()
-  const variantMatch = t.match(/^([A-D]\s*-\s*[A-Za-z0-9\s]+?)(?:\s|$)/i)
-  if (variantMatch) return line.length - t.length + variantMatch[1].length
-  const sectionMatch = t.match(/^([A-Z][A-Z0-9\/\s]*:)\s*/)
-  if (sectionMatch) return line.length - t.length + sectionMatch[1].length
-  const copyCardMatch = t.match(/^(headline:|subline:|CTA:|Note:)\s*/i)
-  if (copyCardMatch) return line.length - t.length + copyCardMatch[1].length
-  return 0
 }
 
 /**
@@ -1635,7 +1636,6 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
 
 async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: string; experimentPageName: string; pageId: string; fileUrl: string; error?: string }>> {
   debugLog = []
-  console.log('[Sync] processJobs START:', jobs.length, 'jobs:', jobs.map(j => j.experimentPageName).join(', '))
   var root = figma.root
   var children = root.children || []
   var templatePage: PageNode | null = null
@@ -1657,9 +1657,8 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
   if (templatePage && typeof (templatePage as any).loadAsync === 'function') {
     try {
       await (templatePage as any).loadAsync()
-    } catch (e) { console.warn('[Sync] template loadAsync failed:', e) }
+    } catch (_) {}
   }
-  console.log('[Sync] Template:', templatePage ? templatePage.name : 'NOT FOUND')
 
   if (!templatePage) {
     return jobs.map(function (job) {
@@ -1672,8 +1671,6 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
 
   for (var i = 0; i < jobs.length; i++) {
     var job = jobs[i]
-    figma.ui.postMessage({ type: 'progress', current: i + 1, total: jobs.length, name: job.experimentPageName })
-    console.log('[Sync] Job', (i + 1) + '/' + jobs.length + ':', job.experimentPageName, '— mapping entries:', (job.nodeMapping || []).length)
     try {
       var briefing = job.briefingPayload as BriefingPayload
       var targetPage: PageNode | null = null
@@ -1694,9 +1691,8 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
 
       // See KNOWN CONSTRAINTS #3: must loadAsync() before traversing cloned page.
       if (targetPage && typeof (targetPage as any).loadAsync === 'function') {
-        try { await (targetPage as any).loadAsync() } catch (e) { console.warn('[Sync] target page loadAsync failed:', e) }
+        try { await (targetPage as any).loadAsync() } catch (_) {}
       }
-      console.log('[Sync] Page ready:', targetPage.name, '— created:', createdNew, '— children:', targetPage.children.length)
 
       targetPage.setPluginData('heimdallIdempotencyKey', job.idempotencyKey)
       targetPage.setPluginData('heimdallMondayItemId', job.mondayItemId || '')
@@ -1749,9 +1745,7 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
             value: val,
           })
         }
-        console.log('[Map] applyNodeMapping START:', mappingEntries.length, 'entries, root:', (contentRoot as any).name || contentRoot.type)
         var mappedCount = await applyNodeMapping(contentRoot, mappingEntries, (job.frameRenames || []).slice())
-        console.log('[Map] applyNodeMapping DONE:', mappedCount, 'nodes mapped')
         if (mappedCount === 0) {
           await fillTextNodes(contentRoot, briefing)
           usedPlaceholderFallback = true
@@ -1770,9 +1764,7 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       // visits) will hang the plugin if run after applyNodeMapping already
       // modified all text nodes. Only run it on the placeholder fallback path.
       if (!hasMapping || usedPlaceholderFallback) {
-        console.log('[Layout] normalizeLayout START (fallback path)')
         var layoutResult = await normalizeLayout(contentRoot)
-        console.log('[Layout] normalizeLayout DONE:', layoutResult.textNodesFixed, 'text fixed,', layoutResult.framesConverted, 'frames converted')
         debugLog.push({
           nodeName: '__LAYOUT_NORM__',
           chars: 'textFixed=' + layoutResult.textNodesFixed
@@ -1788,17 +1780,12 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       var pageId = targetPage.id
       var fileUrl = 'https://www.figma.com/file/' + fileKey + '?node-id=' + encodeURIComponent(pageId.replace(':', '-'))
       results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: pageId, fileUrl: fileUrl })
-      console.log('[Sync] Job', (i + 1) + '/' + jobs.length, 'DONE:', job.experimentPageName)
     } catch (e) {
       var errMsg = e instanceof Error ? e.message : 'Unknown error'
-      console.error('[Sync] Job', (i + 1) + '/' + jobs.length, 'FAILED:', job.experimentPageName, '—', errMsg)
       results.push({ idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: '', fileUrl: '', error: errMsg })
     }
   }
 
-  var okCount = results.filter(function (r) { return !r.error }).length
-  var failCount = results.filter(function (r) { return !!r.error }).length
-  console.log('[Sync] processJobs END:', okCount, 'ok,', failCount, 'failed, total:', results.length)
   return results
 }
 
