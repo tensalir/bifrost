@@ -95,6 +95,34 @@ function getCanonicalLabel(heading: string): string {
   return HEADING_CANONICAL[key] ?? heading.toUpperCase()
 }
 
+/**
+ * For FORMATS sections written as markdown checklists, keep only checked items
+ * and strip checkbox markers so Figma shows clean plain text.
+ */
+function extractCheckedFormats(content: string): string {
+  const lines = content.split(/\r?\n/)
+  const checkedItems: string[] = []
+  let sawChecklist = false
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    const checked = /^[-*]\s*\[(?:x|X)\]\s*(.+)$/.exec(line)
+    if (checked) {
+      sawChecklist = true
+      const value = checked[1].trim()
+      if (value) checkedItems.push(`- ${value}`)
+      continue
+    }
+    if (/^[-*]\s*\[\s*\]\s*(.+)$/.test(line)) {
+      sawChecklist = true
+    }
+  }
+
+  // If this section isn't checklist-based, preserve original content.
+  if (!sawChecklist) return content.trim()
+  return checkedItems.join('\n').trim()
+}
+
 interface VariantRow {
   id: 'A' | 'B' | 'C' | 'D'
   type?: string
@@ -232,7 +260,8 @@ function deterministicBackfill(
           .replace(/^visual\s*:\s*/i, '')
           .replace(/^copy\s+info\s*:\s*/i, '')
           .trim()
-        parts.push(`${label}:\n${cleaned}`)
+        const sectionContent = label === 'FORMATS' ? extractCheckedFormats(cleaned) : cleaned
+        if (sectionContent) parts.push(`${label}:\n${sectionContent}`)
       }
     }
     const briefingContent = parts.join('\n\n')

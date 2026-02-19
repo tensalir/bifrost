@@ -1659,7 +1659,6 @@ async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: s
       await (templatePage as any).loadAsync()
     } catch (_) {}
   }
-
   if (!templatePage) {
     return jobs.map(function (job) {
       return { idempotencyKey: job.idempotencyKey, experimentPageName: job.experimentPageName, pageId: '', fileUrl: '', error: 'No template page found' }
