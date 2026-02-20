@@ -760,20 +760,19 @@ parent.postMessage({ pluginMessage: { type: "get-api-base" } }, "*");
     }
     return header;
   }
-  var boldFontAvailable = false;
   async function ensureBoldFont() {
-    if (boldFontAvailable) return true;
-    try {
-      await figma.loadFontAsync(TEMPLATE_FONT_BOLD);
-      boldFontAvailable = true;
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return false;
   }
   async function styleFilledContent(textNode) {
     const text = textNode.characters;
     if (!text || text.length === 0) return;
+    var currentFont = textNode.fontName;
+    if (currentFont !== figma.mixed && currentFont.family) {
+      try {
+        await figma.loadFontAsync(currentFont);
+      } catch (_) {
+      }
+    }
     try {
       await figma.loadFontAsync(TEMPLATE_FONT);
     } catch (_) {

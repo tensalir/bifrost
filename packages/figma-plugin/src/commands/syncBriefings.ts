@@ -675,14 +675,10 @@ var boldFontAvailable = false
  * retry on every text node if it's unavailable.
  */
 async function ensureBoldFont(): Promise<boolean> {
-  if (boldFontAvailable) return true
-  try {
-    await figma.loadFontAsync(TEMPLATE_FONT_BOLD as FontName)
-    boldFontAvailable = true
-    return true
-  } catch (_) {
-    return false
-  }
+  // Runtime evidence (cold session, no file refresh): plugin repeatedly deadlocks
+  // at loadFontAsync(TEMPLATE_FONT_BOLD). Reliability-first fallback: skip bold
+  // loading in sync flow and keep typography sizing/line-height styling only.
+  return false
 }
 
 /**
@@ -694,6 +690,13 @@ async function ensureBoldFont(): Promise<boolean> {
 async function styleFilledContent(textNode: TextNode): Promise<void> {
   const text = textNode.characters
   if (!text || text.length === 0) return
+  // Load the node's current font without per-character scanning (which
+  // deadlocks after .characters assignment in dynamic-page mode).
+  // textNode.fontName is either a FontName or figma.mixed.
+  var currentFont = textNode.fontName
+  if (currentFont !== figma.mixed && (currentFont as FontName).family) {
+    try { await figma.loadFontAsync(currentFont as FontName) } catch (_) {}
+  }
   try {
     await figma.loadFontAsync(TEMPLATE_FONT as FontName)
   } catch (_) { return }

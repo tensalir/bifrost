@@ -6,7 +6,7 @@
 import type { EvidenceSourceAdapter } from './types.js'
 import type { EvidenceSnippet } from '../angleContext.js'
 import type { EvidenceFilter } from './types.js'
-import { matchEvidenceChunks, isEvidenceRetrievalAvailable } from '@/lib/evidenceClient'
+import { matchEvidenceChunks, isEvidenceRetrievalAvailable, type EvidenceChunkRow } from '@/lib/evidenceClient.js'
 
 const SOURCE_ID = 'meta_ad_comment'
 const CANONICAL_DATASOURCE_ID = 'ad_performance'
@@ -29,7 +29,7 @@ export const metaAdapter: EvidenceSourceAdapter = {
         productOrUseCase: productOrUseCase || undefined,
         since: since || undefined,
       })
-      return rows.map((r) => ({
+      return rows.map((r: EvidenceChunkRow) => ({
         id: r.id,
         text: r.content,
         source: SOURCE_ID,

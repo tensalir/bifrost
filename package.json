@@ -9,9 +9,11 @@
     "dev:backend": "tsx watch src/cli.ts",
     "start": "next start -p 3846",
     "queue": "tsx src/scripts/test-e2e.ts",
-"lint": "eslint src --ext .ts",
+    "lint": "eslint src --ext .ts",
     "test:domain": "tsx src/domain/briefingAssistant/datasources.test.ts && tsx src/domain/briefingAssistant/evidence/metaCsvTransform.test.ts",
-    "test:split": "tsx src/domain/briefingAssistant/splitEngine.test.ts"
+    "test:split": "tsx src/domain/briefingAssistant/splitEngine.test.ts",
+    "build:plugin": "npm run build --workspace=heimdall-figma-plugin",
+    "watch:plugin": "npm run watch --workspace=heimdall-figma-plugin"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -46,5 +48,8 @@
     "tailwindcss": "^4.1.18",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

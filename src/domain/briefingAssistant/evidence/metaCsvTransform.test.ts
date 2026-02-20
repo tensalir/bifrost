@@ -10,7 +10,7 @@ import {
   normalizeRow,
   datasetKeyFromFilename,
   EVIDENCE_DATASOURCE_ID,
-} from './metaCsvTransform'
+} from './metaCsvTransform.js'
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message)

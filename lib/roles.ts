@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createSupabaseBrowserClient } from './supabase-auth'
+import { createSupabaseBrowserClient } from './supabase-auth.js'
 
 export type UserRole = 'admin' | 'user'
 

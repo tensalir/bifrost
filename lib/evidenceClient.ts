@@ -3,7 +3,7 @@
  * Used by briefing assistant adapters; only call from API routes (service key).
  */
 
-import { getSupabase } from './supabase'
+import { getSupabase } from './supabase.js'
 
 const VOYAGE_EMBED_API = 'https://api.voyageai.com/v1/embeddings'
 const EMBED_DIM = 1024
