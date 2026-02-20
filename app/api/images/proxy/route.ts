@@ -1,22 +1,28 @@
 import { NextResponse } from 'next/server'
+import sharp from 'sharp'
 
 /**
  * Image proxy endpoint for Figma plugin.
  *
  * Monday.com protected_static URLs require session cookies that the plugin iframe
  * doesn't have. This endpoint resolves the image via Monday's assets GraphQL API
- * to get a signed public S3 URL, then fetches and returns the bytes with CORS headers.
+ * to get a signed public S3 URL, then fetches and returns bytes with CORS headers.
+ * Non-Figma formats (WebP, SVG, BMP, TIFF, etc.) are normalized to PNG and
+ * dimensions are capped at 4096px for Figma plugin compatibility.
  *
  * Usage: GET /api/images/proxy?url=<encoded-image-url>
+ *        GET /api/images/proxy?assetId=<monday-asset-id>
  *
  * Flow:
- *   1. Extract resource/asset ID from Monday protected_static URL
- *   2. Query Monday assets API for a public_url (signed S3 link)
- *   3. Fetch the image from the public_url
- *   4. Return bytes with CORS headers to the plugin iframe
+ *   1. Resolve via assetId first when present; else extract resource ID from URL
+ *   2. Query Monday assets API for public_url when needed
+ *   3. Fetch the image
+ *   4. Normalize to PNG/JPEG/GIF and <=4096px if needed
+ *   5. Return bytes with CORS headers
  */
 
 const MONDAY_API_URL = 'https://api.monday.com/v2'
+const FIGMA_MAX_DIM = 4096
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -50,11 +56,11 @@ function isAllowedUrl(url: string): boolean {
 }
 
 /**
- * Extract resource/asset ID from a Monday protected_static URL.
- * Pattern: /protected_static/{accountId}/resources/{resourceId}/{filename}
+ * Extract resource/asset ID from Monday URLs.
+ * Matches: /protected_static/.../resources/{id}/... and /resources/{id}/...
  */
 function extractResourceId(url: string): string | null {
-  const match = /\/resources\/(\d+)\//i.exec(url)
+  const match = /\/resources\/(\d+)(?:\/|$)/i.exec(url)
   return match ? match[1] : null
 }
 
@@ -85,6 +91,76 @@ async function resolvePublicUrl(resourceId: string, token: string): Promise<stri
   }
 }
 
+function errorJson(
+  reason: string,
+  error: string,
+  status: number
+): NextResponse {
+  return NextResponse.json(
+    { status: 'error', reason, error },
+    { status, headers: CORS_HEADERS }
+  )
+}
+
+/** Figma plugin supports PNG, JPEG, GIF only; max 4096px. */
+const FIGMA_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif'])
+
+function detectMimeFromMagic(buffer: ArrayBuffer): string | null {
+  const arr = new Uint8Array(buffer)
+  if (arr.length < 4) return null
+  if (arr[0] === 0x89 && arr[1] === 0x50 && arr[2] === 0x4e && arr[3] === 0x47) return 'image/png'
+  if (arr[0] === 0xff && arr[1] === 0xd8 && arr[2] === 0xff) return 'image/jpeg'
+  if (arr[0] === 0x47 && arr[1] === 0x49 && arr[2] === 0x46 && (arr[3] === 0x38 || arr[3] === 0x39)) return 'image/gif'
+  if (arr[0] === 0x52 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x46) return 'image/webp' // RIFF
+  if (arr[0] === 0x3c && (arr[1] === 0x3f || arr[1] === 0x73)) return 'image/svg+xml' // <? or <s
+  if (arr[0] === 0x42 && arr[1] === 0x4d) return 'image/bmp'
+  if ((arr[0] === 0x49 && arr[1] === 0x49) || (arr[0] === 0x4d && arr[1] === 0x4d)) return 'image/tiff'
+  return null
+}
+
+/**
+ * Normalize image to Figma-compatible format (PNG/JPEG/GIF) and max dimension 4096.
+ * Returns PNG buffer or null on failure.
+ */
+async function normalizeToFigmaCompatible(
+  buffer: ArrayBuffer,
+  contentType: string
+): Promise<{ data: Buffer; contentType: string } | { error: string }> {
+  const mime = detectMimeFromMagic(buffer) ?? contentType.split(';')[0].trim().toLowerCase()
+  const buf = Buffer.from(buffer)
+
+  try {
+    let pipeline = sharp(buf)
+    const meta = await pipeline.metadata()
+    const w = meta.width ?? 0
+    const h = meta.height ?? 0
+    const needsResize = w > FIGMA_MAX_DIM || h > FIGMA_MAX_DIM
+    const isFigmaNative = FIGMA_MIMES.has(mime) && !needsResize
+
+    if (isFigmaNative && !needsResize) {
+      return { data: buf, contentType: mime }
+    }
+
+    if (needsResize) {
+      const scale = Math.min(FIGMA_MAX_DIM / Math.max(w, 1), FIGMA_MAX_DIM / Math.max(h, 1), 1)
+      const newW = Math.round(w * scale)
+      const newH = Math.round(h * scale)
+      pipeline = pipeline.resize(newW, newH, { fit: 'inside' })
+    }
+
+    if (FIGMA_MIMES.has(mime)) {
+      const out = await pipeline.toBuffer()
+      return { data: out, contentType: mime }
+    }
+
+    const out = await pipeline.png().toBuffer()
+    return { data: out, contentType: 'image/png' }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Convert failed'
+    return { error: message }
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -98,20 +174,22 @@ export async function GET(request: Request) {
       const publicUrl = await resolvePublicUrl(assetIdParam.trim(), mondayToken)
       if (publicUrl) fetchUrl = publicUrl
       if (!fetchUrl) {
-        return NextResponse.json(
-          { status: 'error', reason: 'asset_resolve_failed', error: 'Could not resolve asset ID to URL' },
-          { status: 404, headers: CORS_HEADERS }
+        return errorJson(
+          'asset_resolve_failed',
+          'Could not resolve asset ID to URL',
+          404
         )
       }
     } else if (imageUrl) {
       if (!isAllowedUrl(imageUrl)) {
-        return NextResponse.json(
-          { status: 'error', reason: 'url_not_allowed', error: 'URL not allowed — only Monday.com image URLs are supported' },
-          { status: 403, headers: CORS_HEADERS }
+        return errorJson(
+          'url_not_allowed',
+          'URL not allowed — only Monday.com image URLs are supported',
+          403
         )
       }
       fetchUrl = imageUrl
-      if (fetchUrl.includes('/protected_static/') && mondayToken) {
+      if (mondayToken) {
         const resourceId = extractResourceId(fetchUrl)
         if (resourceId) {
           const publicUrl = await resolvePublicUrl(resourceId, mondayToken)
@@ -121,45 +199,45 @@ export async function GET(request: Request) {
     }
 
     if (!fetchUrl) {
-      return NextResponse.json(
-        { status: 'error', reason: 'missing_param', error: 'Provide "url" or "assetId" query parameter' },
-        { status: 400, headers: CORS_HEADERS }
+      return errorJson(
+        'missing_param',
+        'Provide "url" or "assetId" query parameter',
+        400
       )
     }
 
     const response = await fetch(fetchUrl, { redirect: 'follow' })
 
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          status: 'error',
-          reason: 'fetch_failed',
-          error: `Image fetch failed: ${response.status} ${response.statusText}`,
-        },
-        { status: 502, headers: CORS_HEADERS }
+      return errorJson(
+        'fetch_failed',
+        `Image fetch failed: ${response.status} ${response.statusText}`,
+        502
       )
     }
 
     const contentType = response.headers.get('content-type') ?? 'image/png'
     const buffer = await response.arrayBuffer()
 
-    return new NextResponse(buffer, {
+    const result = await normalizeToFigmaCompatible(buffer, contentType)
+    if ('error' in result) {
+      return errorJson('decode_failed', result.error, 422)
+    }
+
+    return new NextResponse(result.data, {
       status: 200,
       headers: {
         ...CORS_HEADERS,
-        'Content-Type': contentType,
-        'Content-Length': String(buffer.byteLength),
+        'Content-Type': result.contentType,
+        'Content-Length': String(result.data.length),
         'Cache-Control': 'public, max-age=3600',
       },
     })
   } catch (error) {
-    return NextResponse.json(
-      {
-        status: 'error',
-        reason: 'proxy_error',
-        error: error instanceof Error ? error.message : 'Proxy fetch failed',
-      },
-      { status: 500, headers: CORS_HEADERS }
+    return errorJson(
+      'proxy_error',
+      error instanceof Error ? error.message : 'Proxy fetch failed',
+      500
     )
   }
 }

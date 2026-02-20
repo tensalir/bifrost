@@ -286,20 +286,30 @@ function getStringFromObj(obj: Record<string, unknown>, ...keys: string[]): stri
   return null
 }
 
+/** Keys we treat as asset/file identifiers (including 'id' when value looks like a numeric asset id). */
+const ASSET_ID_KEYS = ['assetId', 'asset_id', 'fileId', 'file_id', 'id']
+
 /** Get string or number (as string) for asset/file id from obj. */
 function getAssetIdFromObj(obj: Record<string, unknown>): string | undefined {
-  const idKeys = ['assetId', 'asset_id', 'fileId', 'file_id']
-  const lowerIdKeys = new Set(idKeys.map((k) => k.toLowerCase()))
+  const lowerIdKeys = new Set(ASSET_ID_KEYS.map((k) => k.toLowerCase()))
   for (const [k, v] of Object.entries(obj)) {
-    if (!(idKeys.includes(k) || lowerIdKeys.has(k.toLowerCase()))) continue
+    if (!lowerIdKeys.has(k.toLowerCase())) continue
+    // Skip generic 'id' if it looks like a UUID or block id (keep numeric asset ids)
+    if (k.toLowerCase() === 'id' && typeof v === 'string' && /^[0-9a-f-]{20,}$/i.test(v)) continue
     if (typeof v === 'string' && v.trim()) return v
     if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   }
   return undefined
 }
 
-/** Flatten block content to a single object; unwrap one level of nesting (e.g. content.data or content.image). */
-function normalizeImageContent(raw: unknown): Record<string, unknown> | null {
+/** URL-like keys we accept for image source (any casing). */
+const IMAGE_URL_KEYS = ['src', 'url', 'publicUrl', 'public_url']
+
+/** Recursively flatten block content into a single object; unwrap nested data/content/image/file. */
+function normalizeImageContent(raw: unknown, depth = 0): Record<string, unknown> | null {
+  const MAX_DEPTH = 5
+  if (depth > MAX_DEPTH) return null
+
   let obj: Record<string, unknown> | null = null
   if (typeof raw === 'string') {
     obj = parseJsonObject(raw)
@@ -307,10 +317,12 @@ function normalizeImageContent(raw: unknown): Record<string, unknown> | null {
     obj = raw as Record<string, unknown>
   }
   if (!obj) return null
-  // Unwrap one level if content is nested (e.g. { data: { src: "..." } } or { image: { url: "..." } })
+
   const nested = obj.data ?? obj.content ?? obj.image ?? obj.file
   if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-    return { ...obj, ...(nested as Record<string, unknown>) }
+    const inner = normalizeImageContent(nested, depth + 1)
+    const merged = { ...obj, ...(inner ?? (nested as Record<string, unknown>)) }
+    return merged
   }
   return obj
 }
@@ -369,7 +381,7 @@ export async function getDocImages(docId: string): Promise<MondayImageAttachment
       if (!content) continue
 
       const url =
-        getStringFromObj(content, 'src', 'url', 'publicUrl', 'public_url') ?? null
+        getStringFromObj(content, 'src', 'url', 'publicUrl', 'public_url', 'rawUrl', 'raw_url') ?? null
       const assetId = getAssetIdFromObj(content)
       const name =
         getStringFromObj(content, 'name', 'fileName', 'file_name') ?? `doc-image-${block.id}`

@@ -1045,56 +1045,29 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
     }
   }
 
-  const { wrapper: uploadsWrapper, body: uploadsCol } = makeColumnWithHeader('Uploads', uploadsW, false)
-  row.appendChild(uploadsWrapper)
+  // Right-side Uploads column removed. References are now rendered in a
+  // dedicated frame below the main briefing panel.
 
-  // Image gallery block: receives images from Monday briefing attachments.
-  // The plugin's image import system finds this frame by name and places images here.
-  const uploadsGallery = figma.createFrame()
-  uploadsGallery.name = 'Uploads Gallery'
-  uploadsGallery.layoutMode = 'VERTICAL'
-  uploadsGallery.primaryAxisSizingMode = 'AUTO'
-  uploadsGallery.counterAxisSizingMode = 'FIXED'
-  uploadsGallery.counterAxisAlignItems = 'MIN'
-  uploadsGallery.itemSpacing = 8 * S
-  uploadsGallery.paddingTop = uploadsGallery.paddingBottom = 8 * S
-  uploadsGallery.paddingLeft = uploadsGallery.paddingRight = 8 * S
-  uploadsGallery.fills = [solidPaint(0.97, 0.97, 0.97)]
-  uploadsGallery.strokes = [solidPaint(0.88, 0.89, 0.92)]
-  uploadsGallery.strokeWeight = Math.max(1, S / 2)
-  uploadsGallery.cornerRadius = 6 * S
-  uploadsGallery.clipsContent = false
-  uploadsGallery.resize(uploadsW, 60 * S)
-  appendAndStretch(uploadsCol, uploadsGallery)
-
-  // Placeholder text ├ö├ç├Â removed automatically when images are imported
-  const uploadsPlaceholder = makeTextNode('Uploads Placeholder', 'Images from Monday will appear here', font)
-  uploadsPlaceholder.fontSize = 10 * S
-  uploadsPlaceholder.fills = [solidPaint(0.6, 0.6, 0.6)]
-  appendAndStretch(uploadsGallery, uploadsPlaceholder)
-
-  // Legacy Frontify link block (kept for manual use)
-  let uploadsBlock = makeBlockFrame()
-  appendAndStretch(uploadsCol, uploadsBlock)
-  appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font))
-
-  // Doc Images: dedicated container below main content for Monday doc embedded images (does not affect column auto-layout)
-  const docImagesFrame = figma.createFrame()
-  docImagesFrame.name = 'Doc Images'
-  docImagesFrame.layoutMode = 'VERTICAL'
-  docImagesFrame.primaryAxisSizingMode = 'AUTO'
-  docImagesFrame.counterAxisSizingMode = 'FIXED'
-  docImagesFrame.counterAxisAlignItems = 'MIN'
-  docImagesFrame.itemSpacing = 8 * S
-  docImagesFrame.paddingTop = docImagesFrame.paddingBottom = 8 * S
-  docImagesFrame.paddingLeft = docImagesFrame.paddingRight = 8 * S
-  docImagesFrame.fills = [solidPaint(0.97, 0.97, 0.97)]
-  docImagesFrame.strokes = [solidPaint(0.88, 0.89, 0.92)]
-  docImagesFrame.strokeWeight = Math.max(1, S / 2)
-  docImagesFrame.cornerRadius = 6 * S
-  docImagesFrame.clipsContent = false
-  docImagesFrame.resize(280 * S, 60 * S)
-  templatePage.appendChild(docImagesFrame)
+  // References: dedicated container below main content for Monday image references.
+  // Kept outside the right-side columns so imported images do not alter auto-layout columns.
+  const referencesFrame = figma.createFrame()
+  referencesFrame.name = 'References'
+  referencesFrame.layoutMode = 'VERTICAL'
+  referencesFrame.primaryAxisSizingMode = 'AUTO'
+  referencesFrame.counterAxisSizingMode = 'FIXED'
+  referencesFrame.counterAxisAlignItems = 'MIN'
+  referencesFrame.itemSpacing = 8 * S
+  referencesFrame.paddingTop = referencesFrame.paddingBottom = 8 * S
+  referencesFrame.paddingLeft = referencesFrame.paddingRight = 8 * S
+  referencesFrame.fills = [solidPaint(0.97, 0.97, 0.97)]
+  referencesFrame.strokes = [solidPaint(0.88, 0.89, 0.92)]
+  referencesFrame.strokeWeight = Math.max(1, S / 2)
+  referencesFrame.cornerRadius = 6 * S
+  referencesFrame.clipsContent = false
+  referencesFrame.resize(280 * S, 60 * S)
+  referencesFrame.x = section.x
+  referencesFrame.y = section.y + section.height + 24 * S
+  templatePage.appendChild(referencesFrame)
 
   // Apply bold styling to all template text nodes
   async function boldAllText(node: BaseNode): Promise<void> {
@@ -1521,7 +1494,13 @@ var debugLog: DebugEntry[] = []
 function findDocImagesTarget(page: PageNode): FrameNode | null {
   for (let i = 0; i < page.children.length; i++) {
     const node = page.children[i]
-    if (node.type === 'FRAME' && (node as FrameNode).name.toLowerCase() === 'doc images') {
+    if (
+      node.type === 'FRAME' &&
+      (
+        (node as FrameNode).name.toLowerCase() === 'references' ||
+        (node as FrameNode).name.toLowerCase() === 'doc images'
+      )
+    ) {
       return node as FrameNode
     }
   }
@@ -1529,61 +1508,20 @@ function findDocImagesTarget(page: PageNode): FrameNode | null {
 }
 
 /**
- * Find the image target frame: prefer "Doc Images" (dedicated below-layout container), else Uploads Gallery / column body.
+ * Find image target frame: prefer dedicated below-layout container.
+ * (References, fallback-compatible with older Doc Images)
  */
 function findUploadsBody(page: PageNode): FrameNode | null {
   const docImages = findDocImagesTarget(page)
   if (docImages) return docImages
-
-  let gallery: FrameNode | null = null
-  let columnBody: FrameNode | null = null
-
-  function walk(node: BaseNode): void {
-    if (node.type === 'FRAME') {
-      const frame = node as FrameNode
-      const name = frame.name.toLowerCase()
-
-      if (name === 'uploads gallery') {
-        gallery = frame
-        return
-      }
-
-      if (name === 'uploads column' || name === 'uploads') {
-        if (frame.children && frame.children.length >= 2) {
-          const body = frame.children[1]
-          if (body.type === 'FRAME') columnBody = body as FrameNode
-        }
-        if (!columnBody) {
-          for (let i = 0; i < (frame.children?.length ?? 0); i++) {
-            const child = frame.children[i]
-            if (child.type === 'FRAME' && !(child as FrameNode).name.toLowerCase().includes('header')) {
-              columnBody = child as FrameNode
-              break
-            }
-          }
-        }
-      }
-    }
-    const container = node as { children?: readonly BaseNode[] }
-    if (container.children) {
-      for (let i = 0; i < container.children.length; i++) {
-        walk(container.children[i])
-        if (gallery) return
-      }
-    }
-  }
-  walk(page)
-  const result = gallery ?? columnBody
-  if (!result) {
-    console.warn('findUploadsBody: Doc Images / Uploads Gallery not found on page', page.name)
-  }
-  return result
+  console.warn('findUploadsBody: References/Doc Images frame not found on page', page.name)
+  return null
 }
 
-/** Create a dedicated Doc Images frame on-page as last-resort fallback target. */
+/** Create a dedicated References frame on-page as last-resort fallback target. */
 function createFallbackDocImagesTarget(page: PageNode): FrameNode {
   const frame = figma.createFrame()
-  frame.name = 'Doc Images'
+  frame.name = 'References'
   frame.layoutMode = 'VERTICAL'
   frame.primaryAxisSizingMode = 'AUTO'
   frame.counterAxisSizingMode = 'FIXED'
@@ -1624,75 +1562,96 @@ function isSupportedImageFormat(bytes: Uint8Array): boolean {
   return png || jpeg || gif
 }
 
+/** Result of placing one image: success or failure with reason. */
+type PlaceImageResult = { ok: true } | { ok: false; reason: string }
+
 /**
  * Place a single image into the Uploads column body frame.
- * Creates a rectangle with the image as fill, sized to fit the column width.
+ * Uses actual image dimensions from getSizeAsync() to preserve aspect ratio; fits to column width.
  */
 async function placeImageInUploads(
   uploadsBody: FrameNode,
   imageBytes: Uint8Array,
   imageName: string
-): Promise<boolean> {
+): Promise<PlaceImageResult> {
   if (!isSupportedImageFormat(imageBytes)) {
-    console.warn('Skipping unsupported image format (use PNG/JPEG/GIF):', imageName)
-    return false
+    const reason = 'Unsupported format (use PNG/JPEG/GIF)'
+    console.warn('Skipping:', imageName, reason)
+    return { ok: false, reason }
   }
   try {
     const image = figma.createImage(imageBytes)
     const rect = figma.createRectangle()
     rect.name = imageName || 'Briefing Image'
 
-    // Size to fit the uploads column width with appropriate aspect ratio
     const columnWidth = uploadsBody.width > 0 ? uploadsBody.width : 260
-    const thumbHeight = Math.round(columnWidth * 0.6) // Default 3:5 aspect
-    rect.resize(columnWidth, thumbHeight)
+    let thumbWidth = columnWidth
+    let thumbHeight = Math.round(columnWidth * 0.6)
+    try {
+      const size = await image.getSizeAsync()
+      if (size.width > 0 && size.height > 0) {
+        const scale = columnWidth / size.width
+        thumbHeight = Math.round(size.height * scale)
+      }
+    } catch (_) {
+      // keep default aspect if getSizeAsync fails
+    }
+    rect.resize(thumbWidth, thumbHeight)
 
-    // Apply the image as a fill
     rect.fills = [{
       type: 'IMAGE',
       imageHash: image.hash,
       scaleMode: 'FIT',
     }]
-
-    // Add corner radius for a cleaner look
     rect.cornerRadius = 4
 
     uploadsBody.appendChild(rect)
     try { (rect as any).layoutAlign = 'STRETCH' } catch (_) {}
-    return true
+    return { ok: true }
   } catch (e) {
+    const reason = e instanceof Error ? e.message : 'Unknown error'
     console.error('Failed to place image:', imageName, e)
-    return false
+    return { ok: false, reason }
   }
 }
+
+/** Result of importing images into a page: count placed and per-image failures. */
+export type ImportImagesResult = { placed: number; failures: Array<{ name: string; reason: string }> }
 
 /**
  * Import images into a page's Uploads column.
  * Called after image bytes are received from the UI iframe.
  * Caller should ensure page.loadAsync() was called for dynamic pages before this.
  */
-async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Array; name: string }>): Promise<number> {
-  const page = figma.getNodeById(pageId)
+async function importImagesToPage(
+  pageId: string,
+  images: Array<{ bytes: Uint8Array; name: string }>
+): Promise<ImportImagesResult> {
+  const failures: Array<{ name: string; reason: string }> = []
+  const page = await figma.getNodeByIdAsync(pageId)
   if (!page || page.type !== 'PAGE') {
     console.warn('importImagesToPage: page not found or not a PAGE', pageId)
-    return 0
+    return { placed: 0, failures }
   }
 
   let uploadsBody = findUploadsBody(page as PageNode)
   if (!uploadsBody) {
-    // Retry once after 500ms for dynamic pages that may not have loaded children yet.
     await new Promise((r) => setTimeout(r, 500))
     uploadsBody = findUploadsBody(page as PageNode)
   }
   if (!uploadsBody) {
-    // Last resort: create a dedicated Doc Images frame so import still succeeds.
     uploadsBody = createFallbackDocImagesTarget(page as PageNode)
   }
 
-  // Remove placeholder content before placing images.
-  // Handles both new template ("Images from Monday will appear here")
-  // and old template ("Frontify") placeholders.
-  const PLACEHOLDER_PATTERNS = ['frontify', 'images from monday', 'uploads placeholder']
+  const nameBriefing = (page as PageNode).children.find((c) => c.type === 'FRAME' && (c as FrameNode).name === 'Name Briefing') as FrameNode | undefined
+  if (nameBriefing) {
+    // Keep references visually separate from briefing content: pin left of Name Briefing.
+    const gap = 24 * S
+    uploadsBody.x = nameBriefing.x - uploadsBody.width - gap
+    uploadsBody.y = nameBriefing.y
+  }
+
+  const PLACEHOLDER_PATTERNS = ['frontify', 'images from monday', 'uploads placeholder', 'references placeholder']
   for (let i = uploadsBody.children.length - 1; i >= 0; i--) {
     const child = uploadsBody.children[i]
     if (child.type === 'TEXT') {
@@ -1701,7 +1660,6 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
         child.remove()
       }
     } else if (child.type === 'FRAME') {
-      // Check nested block frames for placeholder text
       const block = child as FrameNode
       let hasOnlyPlaceholder = true
       for (let j = block.children.length - 1; j >= 0; j--) {
@@ -1717,7 +1675,6 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
           hasOnlyPlaceholder = false
         }
       }
-      // Remove empty block frames left after placeholder removal
       if (hasOnlyPlaceholder && block.children.length === 0) {
         block.remove()
       }
@@ -1726,10 +1683,14 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
 
   let placed = 0
   for (const img of images) {
-    const ok = await placeImageInUploads(uploadsBody, img.bytes, img.name)
-    if (ok) placed++
+    const result = await placeImageInUploads(uploadsBody, img.bytes, img.name)
+    if (result.ok) {
+      placed++
+    } else {
+      failures.push({ name: img.name, reason: result.reason })
+    }
   }
-  return placed
+  return { placed, failures }
 }
 
 async function processJobs(jobs: QueuedJob[]): Promise<Array<{ idempotencyKey: string; experimentPageName: string; pageId: string; fileUrl: string; error?: string }>> {
@@ -2112,12 +2073,12 @@ var uiHtml = '<html><head><style>'
   + '  el.textContent = "Fetching " + images.length + " image(s) from Monday...";'
   + '  el.className = "";'
   + '  var results = [];'
+  + '  var fetchFailures = [];'
   + '  var done = 0;'
-  + '  var errors = 0;'
   + '  function next(i) {'
   + '    if (i >= images.length) {'
-  + '      el.textContent = "Images fetched: " + (done - errors) + " ok, " + errors + " failed. Importing...";'
-  + '      parent.postMessage({ pluginMessage: { type: "images-fetched", images: results, imageCount: images.length } }, "*");'
+  + '      el.textContent = "Images fetched: " + results.length + " ok, " + fetchFailures.length + " failed. Importing...";'
+  + '      parent.postMessage({ pluginMessage: { type: "images-fetched", images: results, imageCount: images.length, fetchFailures: fetchFailures } }, "*");'
   + '      return;'
   + '    }'
   + '    var img = images[i];'
@@ -2126,17 +2087,17 @@ var uiHtml = '<html><head><style>'
   + '    function doFetch(attempt) {'
   + '      fetch(fetchUrl)'
   + '        .then(function(r) {'
-  + '          if (!r.ok) throw new Error("HTTP " + r.status);'
+  + '          if (!r.ok) { var errBody = r.status + " " + (r.statusText || ""); return r.json().then(function(j){ throw new Error(j.error || j.reason || errBody); }, function(){ throw new Error(errBody); }); }'
   + '          return r.arrayBuffer();'
   + '        })'
   + '        .then(function(buf) {'
-  + '          results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });'
-  + '          done++;'
-  + '          next(i + 1);'
+  + '          if (buf && buf.byteLength > 0) results.push({ url: img.url, name: img.name, pageId: img.pageId, bytes: Array.from(new Uint8Array(buf)) });'
+  + '          else fetchFailures.push({ name: img.name, reason: "Empty response" });'
+  + '          done++; next(i + 1);'
   + '        })'
   + '        .catch(function(err) {'
   + '          if (attempt < 2) { setTimeout(function() { doFetch(attempt + 1); }, 500); }'
-  + '          else { console.warn("Image fetch failed:", img.url || img.assetId, err); errors++; done++; next(i + 1); }'
+  + '          else { var reason = err && err.message ? err.message : String(err); fetchFailures.push({ name: img.name, reason: reason }); console.warn("Image fetch failed:", img.name, reason); done++; next(i + 1); }'
   + '        });'
   + '    }'
   + '    doFetch(1);'
@@ -2172,7 +2133,18 @@ var uiHtml = '<html><head><style>'
   + '  if (d.type === "images-import-done") {'
   + '    var el = document.getElementById("msg");'
   + '    var prev = el.textContent || "";'
-  + '    el.textContent = prev + " | Images: " + d.placed + "/" + d.total + " placed in Figma.";'
+  + '    var line = "Images: " + d.placed + "/" + d.total + " placed in Figma.";'
+  + '    var fetchFailures = d.fetchFailures || [];'
+  + '    var failures = d.failures || [];'
+  + '    if (fetchFailures.length || failures.length) {'
+  + '      line += " Failed: ";'
+  + '      var parts = [];'
+  + '      for (var i = 0; i < fetchFailures.length; i++) parts.push(fetchFailures[i].name + " (fetch: " + fetchFailures[i].reason + ")");'
+  + '      for (var j = 0; j < failures.length; j++) parts.push(failures[j].name + " (" + failures[j].reason + ")");'
+  + '      line += parts.join("; ");'
+  + '      el.className = "err";'
+  + '    }'
+  + '    el.textContent = prev ? (prev + " | " + line) : line;'
   + '  }'
   + '  if (d.type === "debug-log") {'
   + '    var el = document.getElementById("msg");'
@@ -2297,10 +2269,13 @@ export function runSyncBriefings() {
 
     if (msg.type === 'images-fetched' && msg.images) {
       var totalPlaced = 0
+      var allFailures: Array<{ name: string; reason: string }> = []
+      var fetchFailures: Array<{ name: string; reason: string }> = (msg.fetchFailures as Array<{ name: string; reason: string }>) ?? []
       var byPage: Record<string, Array<{ bytes: Uint8Array; name: string }>> = {}
+      var emptySkipped = 0
       for (var idx = 0; idx < msg.images.length; idx++) {
         var imgData = msg.images[idx]
-        if (!imgData.bytes || imgData.bytes.length === 0) continue
+        if (!imgData.bytes || imgData.bytes.length === 0) { emptySkipped++; continue }
         if (!byPage[imgData.pageId]) byPage[imgData.pageId] = []
         byPage[imgData.pageId].push({
           bytes: new Uint8Array(imgData.bytes),
@@ -2310,17 +2285,28 @@ export function runSyncBriefings() {
       var pageIds = Object.keys(byPage)
       for (var pi = 0; pi < pageIds.length; pi++) {
         var pageId = pageIds[pi]
-        var page = figma.getNodeById(pageId)
-        if (page && page.type === 'PAGE' && typeof (page as any).loadAsync === 'function') {
-          await (page as any).loadAsync()
+        var _node = await figma.getNodeByIdAsync(pageId)
+        if (_node && _node.type === 'PAGE' && typeof (_node as any).loadAsync === 'function') {
+          await (_node as any).loadAsync()
         }
-        var placed = await importImagesToPage(pageId, byPage[pageId])
-        totalPlaced += placed
+        var result = await importImagesToPage(pageId, byPage[pageId])
+        totalPlaced += result.placed
+        for (var fi = 0; fi < result.failures.length; fi++) {
+          allFailures.push(result.failures[fi])
+        }
+      }
+      var totalRequested = msg.imageCount ?? msg.images.length
+      var totalFailed = allFailures.length + fetchFailures.length
+      var summary = 'Images: requested=' + totalRequested + ' placed=' + totalPlaced + ' failed=' + totalFailed
+      if (allFailures.length + fetchFailures.length > 0) {
+        debugLog.push({ nodeName: '__IMAGE_IMPORT__', chars: summary, path: [], matched: true })
       }
       figma.ui.postMessage({
         type: 'images-import-done',
         placed: totalPlaced,
-        total: msg.imageCount ?? msg.images.length,
+        total: totalRequested,
+        failures: allFailures,
+        fetchFailures: fetchFailures,
       })
     }
   }
