@@ -667,18 +667,22 @@ function makeColumnHeader(
   return header
 }
 
-/** Track whether Bold font loaded successfully. */
-var boldFontAvailable = false
+/** Track whether Bold font loaded successfully (cached for session). */
+var boldFontAvailable: boolean | null = null
 
 /**
- * Try to load the Bold font once; cache the result so we don't
- * retry on every text node if it's unavailable.
+ * Try to load the Bold font once; cache the result so we don't retry on every text node.
+ * If loading fails or deadlocks, fall back to size-only styling for section labels.
  */
 async function ensureBoldFont(): Promise<boolean> {
-  // Runtime evidence (cold session, no file refresh): plugin repeatedly deadlocks
-  // at loadFontAsync(TEMPLATE_FONT_BOLD). Reliability-first fallback: skip bold
-  // loading in sync flow and keep typography sizing/line-height styling only.
-  return false
+  if (boldFontAvailable !== null) return boldFontAvailable
+  try {
+    await figma.loadFontAsync(TEMPLATE_FONT_BOLD as FontName)
+    boldFontAvailable = true
+  } catch (_) {
+    boldFontAvailable = false
+  }
+  return boldFontAvailable
 }
 
 /**
@@ -710,7 +714,7 @@ async function styleFilledContent(textNode: TextNode): Promise<void> {
   textNode.setRangeLineHeight(0, len, { unit: 'PIXELS', value: CONTENT_FONT_SIZE + 5 })
 
   // Three-tier typography: primary labels (14px Bold), sub-headers (12px Bold), content (12px Regular).
-  const KNOWN_LABELS = /^(IDEA:|WHY:|AUDIENCE\/REGION:|SEGMENT:|FORMATS:|VARIANTS:|Product:|Visual:|Copy:|Copy info:|Note:|Test:|headline:|subline:|CTA:|[A-D]\s*-\s*(?:Video|Image|Static|Carousel|[A-Za-z]+):)/i
+  const KNOWN_LABELS = /^(IDEA:|WHY:|AUDIENCE\/REGION:|SEGMENT:|FORMATS:|VARIANTS:|Product:|Visual:|Copy:|Copy info:|Note:|Test:|Testing:|headline:|subline:|CTA:|[A-D]\s*-\s*(?:Video|Image|Static|Carousel|[A-Za-z]+):)/i
   const SUB_LABELS = /^(Input visual \+ copy direction:|Script:)/i
   const lines = text.split('\n')
   let offset = 0
@@ -733,6 +737,32 @@ async function styleFilledContent(textNode: TextNode): Promise<void> {
       textNode.setRangeLineHeight(offset, labelEnd, { unit: 'PIXELS', value: LABEL_FONT_SIZE + 5 })
     }
     offset += line.length + 1 // +1 for the \n
+  }
+
+  applyHyperlinksToTextNode(textNode)
+}
+
+/** Match URL-like substrings (http/https) for hyperlink application. */
+const URL_REGEX = /https?:\/\/[^\s\]\)"\']+/g
+
+/**
+ * Detect URLs in text and set range hyperlinks so they are clickable in Figma.
+ * Idempotent; safe to call after content and styling are set.
+ */
+function applyHyperlinksToTextNode(textNode: TextNode): void {
+  const text = textNode.characters
+  if (!text || text.length === 0) return
+  let m: RegExpExecArray | null
+  URL_REGEX.lastIndex = 0
+  while ((m = URL_REGEX.exec(text)) !== null) {
+    const start = m.index
+    const end = start + m[0].length
+    const url = m[0]
+    try {
+      textNode.setRangeHyperlink(start, end, { type: 'URL', url })
+    } catch (_) {
+      // Skip if API fails for this range
+    }
   }
 }
 
@@ -1047,6 +1077,24 @@ async function createAutoLayoutTemplate(): Promise<{ error?: string }> {
   let uploadsBlock = makeBlockFrame()
   appendAndStretch(uploadsCol, uploadsBlock)
   appendAndStretch(uploadsBlock, makeTextNode('Frontify', 'Frontify', font))
+
+  // Doc Images: dedicated container below main content for Monday doc embedded images (does not affect column auto-layout)
+  const docImagesFrame = figma.createFrame()
+  docImagesFrame.name = 'Doc Images'
+  docImagesFrame.layoutMode = 'VERTICAL'
+  docImagesFrame.primaryAxisSizingMode = 'AUTO'
+  docImagesFrame.counterAxisSizingMode = 'FIXED'
+  docImagesFrame.counterAxisAlignItems = 'MIN'
+  docImagesFrame.itemSpacing = 8 * S
+  docImagesFrame.paddingTop = docImagesFrame.paddingBottom = 8 * S
+  docImagesFrame.paddingLeft = docImagesFrame.paddingRight = 8 * S
+  docImagesFrame.fills = [solidPaint(0.97, 0.97, 0.97)]
+  docImagesFrame.strokes = [solidPaint(0.88, 0.89, 0.92)]
+  docImagesFrame.strokeWeight = Math.max(1, S / 2)
+  docImagesFrame.cornerRadius = 6 * S
+  docImagesFrame.clipsContent = false
+  docImagesFrame.resize(280 * S, 60 * S)
+  templatePage.appendChild(docImagesFrame)
 
   // Apply bold styling to all template text nodes
   async function boldAllText(node: BaseNode): Promise<void> {
@@ -1468,11 +1516,25 @@ var debugLog: DebugEntry[] = []
 // =====================================================
 
 /**
- * Find the image target frame in the "Uploads" column.
- * New templates: looks for "Uploads Gallery" frame (dedicated image container).
- * Old templates: falls back to the column body frame (second child of "Uploads Column").
+ * Find dedicated "Doc Images" frame on the page (below main content). Prefer this for Monday doc images so they don't affect column layout.
+ */
+function findDocImagesTarget(page: PageNode): FrameNode | null {
+  for (let i = 0; i < page.children.length; i++) {
+    const node = page.children[i]
+    if (node.type === 'FRAME' && (node as FrameNode).name.toLowerCase() === 'doc images') {
+      return node as FrameNode
+    }
+  }
+  return null
+}
+
+/**
+ * Find the image target frame: prefer "Doc Images" (dedicated below-layout container), else Uploads Gallery / column body.
  */
 function findUploadsBody(page: PageNode): FrameNode | null {
+  const docImages = findDocImagesTarget(page)
+  if (docImages) return docImages
+
   let gallery: FrameNode | null = null
   let columnBody: FrameNode | null = null
 
@@ -1481,13 +1543,11 @@ function findUploadsBody(page: PageNode): FrameNode | null {
       const frame = node as FrameNode
       const name = frame.name.toLowerCase()
 
-      // Prefer the dedicated gallery frame (new templates)
       if (name === 'uploads gallery') {
         gallery = frame
         return
       }
 
-      // Fallback: find column body in "Uploads Column" wrapper (old templates)
       if (name === 'uploads column' || name === 'uploads') {
         if (frame.children && frame.children.length >= 2) {
           const body = frame.children[1]
@@ -1508,16 +1568,51 @@ function findUploadsBody(page: PageNode): FrameNode | null {
     if (container.children) {
       for (let i = 0; i < container.children.length; i++) {
         walk(container.children[i])
-        if (gallery) return // found the best target, stop
+        if (gallery) return
       }
     }
   }
   walk(page)
   const result = gallery ?? columnBody
   if (!result) {
-    console.warn('findUploadsBody: Uploads Gallery not found on page', page.name)
+    console.warn('findUploadsBody: Doc Images / Uploads Gallery not found on page', page.name)
   }
   return result
+}
+
+/** Create a dedicated Doc Images frame on-page as last-resort fallback target. */
+function createFallbackDocImagesTarget(page: PageNode): FrameNode {
+  const frame = figma.createFrame()
+  frame.name = 'Doc Images'
+  frame.layoutMode = 'VERTICAL'
+  frame.primaryAxisSizingMode = 'AUTO'
+  frame.counterAxisSizingMode = 'FIXED'
+  frame.counterAxisAlignItems = 'MIN'
+  frame.itemSpacing = 8 * S
+  frame.paddingTop = frame.paddingBottom = 8 * S
+  frame.paddingLeft = frame.paddingRight = 8 * S
+  frame.fills = [solidPaint(0.97, 0.97, 0.97)]
+  frame.strokes = [solidPaint(0.88, 0.89, 0.92)]
+  frame.strokeWeight = Math.max(1, S / 2)
+  frame.cornerRadius = 6 * S
+  frame.clipsContent = false
+  frame.resize(280 * S, 60 * S)
+
+  // Place below the main Name Briefing frame when present.
+  let x = 0
+  let y = 0
+  for (let i = 0; i < page.children.length; i++) {
+    const child = page.children[i]
+    if (child.type === 'FRAME' && (child as FrameNode).name === 'Name Briefing') {
+      x = (child as FrameNode).x
+      y = (child as FrameNode).y + (child as FrameNode).height + 24 * S
+      break
+    }
+  }
+  frame.x = x
+  frame.y = y
+  page.appendChild(frame)
+  return frame
 }
 
 /** Figma createImage supports PNG, JPEG, GIF only. Validate by magic bytes and skip unsupported. */
@@ -1590,8 +1685,8 @@ async function importImagesToPage(pageId: string, images: Array<{ bytes: Uint8Ar
     uploadsBody = findUploadsBody(page as PageNode)
   }
   if (!uploadsBody) {
-    console.warn('No Uploads column found in page:', (page as PageNode).name)
-    return 0
+    // Last resort: create a dedicated Doc Images frame so import still succeeds.
+    uploadsBody = createFallbackDocImagesTarget(page as PageNode)
   }
 
   // Remove placeholder content before placing images.
@@ -2027,7 +2122,7 @@ var uiHtml = '<html><head><style>'
   + '    }'
   + '    var img = images[i];'
   + '    el.textContent = "Fetching image " + (i + 1) + "/" + images.length + ": " + img.name;'
-  + '    var fetchUrl = (img.assetId && !img.url) ? (HEIMDALL_API + "/api/images/proxy?assetId=" + encodeURIComponent(img.assetId)) : (HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url || ""));'
+  + '    var fetchUrl = img.assetId ? (HEIMDALL_API + "/api/images/proxy?assetId=" + encodeURIComponent(img.assetId)) : (HEIMDALL_API + "/api/images/proxy?url=" + encodeURIComponent(img.url || ""));'
   + '    function doFetch(attempt) {'
   + '      fetch(fetchUrl)'
   + '        .then(function(r) {'
@@ -2121,10 +2216,6 @@ export function runSyncBriefings() {
       })
     }
     if (msg.type === 'ui-handlers-bound') {
-    }
-    if (msg.type === 'ui-script-error') {
-    }
-    if (msg.type === 'ui-script-rejection') {
     }
     if (msg.type === 'get-api-base') {
       const saved = await figma.clientStorage.getAsync('heimdallApiBase')

@@ -120,6 +120,17 @@ export async function POST(request: NextRequest) {
             }),
           })
         } else {
+          const allMapKeys = Object.keys(map).sort()
+          if (allMapKeys.length > 0) {
+            return NextResponse.json({
+              needsBatchSelection: true,
+              availableBatches: allMapKeys,
+              batchLabels: allMapKeys.map((k) => {
+                const p = parseBatchToCanonical(k)
+                return p ? `${p.expectedFileName.split(' - ')[0] ?? k}` : k
+              }),
+            })
+          }
           return NextResponse.json({
             needsBatchSelection: true,
             availableBatches: [],

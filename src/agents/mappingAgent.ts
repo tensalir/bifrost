@@ -95,9 +95,16 @@ function getCanonicalLabel(heading: string): string {
   return HEADING_CANONICAL[key] ?? heading.toUpperCase()
 }
 
+function isKnownDocHeading(heading: string): boolean {
+  const key = heading.toLowerCase().trim()
+  return Object.prototype.hasOwnProperty.call(HEADING_CANONICAL, key)
+}
+
 /**
  * For FORMATS sections written as markdown checklists, keep only checked items
  * and strip checkbox markers so Figma shows clean plain text.
+ * Supports: "- [x] item" and "[x] item" (docReader output). Unchecked "[ ]" lines are excluded.
+ * Preserves full line text verbatim (e.g. aspect ratios like "video (9:16 + 4:5)").
  */
 function extractCheckedFormats(content: string): string {
   const lines = content.split(/\r?\n/)
@@ -106,21 +113,22 @@ function extractCheckedFormats(content: string): string {
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
-    const checked = /^[-*]\s*\[(?:x|X)\]\s*(.+)$/.exec(line)
+    // Match "- [x] item" or "[x] item" (no leading bullet)
+    const checked =
+      /^[-*]\s*\[(?:x|X)\]\s*(.+)$/.exec(line) ?? /^\[(?:x|X)\]\s*(.+)$/.exec(line)
     if (checked) {
       sawChecklist = true
       const value = checked[1].trim()
       if (value) checkedItems.push(`- ${value}`)
       continue
     }
-    if (/^[-*]\s*\[\s*\]\s*(.+)$/.test(line)) {
+    if (/^[-*]?\s*\[\s*\]\s*(.+)$/.test(line) || /^\[\s*\]\s*(.+)$/.test(line)) {
       sawChecklist = true
     }
   }
 
-  // If this section isn't checklist-based, preserve original content.
-  if (!sawChecklist) return content.trim()
-  return checkedItems.join('\n').trim()
+  const result = !sawChecklist ? content.trim() : checkedItems.join('\n').trim()
+  return result
 }
 
 interface VariantRow {
@@ -166,57 +174,83 @@ function inferVariantCount(content: string, variantRows: VariantRow[]): number |
   return inlineLetters.size > 0 ? inlineLetters.size : null
 }
 
-/** Match start of a variant table row: |  A - Video | or | B - Video | */
-const ROW_START = /^\|\s*([A-D])\s*-\s*([^|]+)\|/i
+/** Split a markdown table row (`| a | b |`) into trimmed cell values. */
+function parseMarkdownRow(line: string): string[] {
+  const trimmed = line.trim()
+  if (!trimmed.startsWith('|')) return []
+  const raw = trimmed.replace(/^\|/, '').replace(/\|$/, '')
+  return raw.split('|').map((c) => c.trim())
+}
 
 /**
- * Parse the Variants markdown table with multi-line cells.
- * Table format: | Variant | input visual + copy directions | Script |
- * Rows start with | A - Video | and span multiple lines until the next row or empty row.
+ * Parse variant tables from Monday doc markdown.
+ * Supports both row shapes:
+ *  - `| A - Video | input visual | Script |`
+ *  - `| A | Static | input visual | input copy |`
  */
 function parseVariantTableRows(doc: string): VariantRow[] {
   const out: VariantRow[] = []
-  // Find table body: after the separator row (2 or 3+ columns)
-  const sepMatch = doc.match(/\|\s*---\s*\|\s*---\s*\|/)
-  if (!sepMatch || sepMatch.index === undefined) return out
-  const tableStart = sepMatch.index + sepMatch[0].length
-  const tableBody = doc.slice(tableStart)
+  const lines = doc.split(/\r?\n/)
 
-  const lines = tableBody.split(/\r?\n/)
   let i = 0
   while (i < lines.length) {
-    const line = lines[i]
-    const rowStartMatch = ROW_START.exec(line)
-    if (!rowStartMatch) {
+    const headerCells = parseMarkdownRow(lines[i])
+    const sepLine = lines[i + 1]?.trim() ?? ''
+    const isSeparator = /^\|\s*[-: ]+\|\s*[-: |]+\|?\s*$/.test(sepLine)
+    if (!headerCells.length || !isSeparator) {
       i++
       continue
     }
-    const id = rowStartMatch[1].toUpperCase() as VariantRow['id']
-    const typeCell = rowStartMatch[2].trim()
-    const typeLabel = typeCell || undefined
 
-    const rowLines: string[] = [line]
-    i++
-    while (i < lines.length) {
-      const next = lines[i]
-      if (ROW_START.test(next) || /^\|\s*\|\s*\|\s*\|?\s*$/.test(next)) break
-      rowLines.push(next)
+    const lowerHeaders = headerCells.map((h) => h.toLowerCase())
+    const variantIdx = lowerHeaders.findIndex((h) => h.includes('variant'))
+    if (variantIdx < 0) {
       i++
+      continue
+    }
+    const typeIdx = lowerHeaders.findIndex((h) => h === 'type' || h.includes('type') || h.includes('format'))
+    const visualIdx = lowerHeaders.findIndex((h) => h.includes('input visual') || h === 'visual')
+    const scriptIdx = lowerHeaders.findIndex((h) => h.includes('script') || h.includes('input copy') || h === 'copy')
+
+    // Capture table body until next heading (or EOF) so multiline cells are preserved.
+    let end = lines.length
+    for (let j = i + 2; j < lines.length; j++) {
+      if (/^\s*##\s+/.test(lines[j])) {
+        end = j
+        break
+      }
+    }
+    const tableBody = lines.slice(i + 2, end).join('\n')
+
+    // Row starts can be either "| A - Video |" or "| A |".
+    const rowStart = /^\|\s*([A-D])(?:\s*-\s*([^|]+))?\s*\|/gim
+    const matches = Array.from(tableBody.matchAll(rowStart))
+    for (let m = 0; m < matches.length; m++) {
+      const current = matches[m]
+      const start = current.index ?? 0
+      const nextStart = matches[m + 1]?.index ?? tableBody.length
+      const chunk = tableBody.slice(start, nextStart).trim()
+
+      const id = current[1].toUpperCase() as VariantRow['id']
+      const typeFromVariantCell = current[2]?.trim() || undefined
+
+      // Split by table separators while preserving multiline cell content.
+      const rowCells = chunk
+        .split('|')
+        .slice(1, -1)
+        .map((c) => c.replace(/\r?\n\s*/g, '\n').trim())
+
+      const type = typeFromVariantCell || (typeIdx >= 0 ? (rowCells[typeIdx] ?? '').trim() || undefined : undefined)
+      const visualDirection = visualIdx >= 0 ? (rowCells[visualIdx] ?? '').trim() || undefined : undefined
+      const script = scriptIdx >= 0 ? (rowCells[scriptIdx] ?? '').trim() || undefined : undefined
+      out.push({ id, type, visualDirection, script })
     }
 
-    const rowText = rowLines.join('\n')
-    const parts = rowText.split('|')
-    if (parts.length >= 4) {
-      const visualDirection = parts[2].trim() || undefined
-      const script = parts[3].trim() || undefined
-      out.push({ id, type: typeLabel, visualDirection, script })
-    } else if (parts.length >= 3) {
-      const visualDirection = parts[2].trim() || undefined
-      out.push({ id, type: typeLabel, visualDirection })
-    } else {
-      out.push({ id, type: typeLabel })
-    }
+    // Continue scanning after this table block.
+    i = end
+    continue
   }
+
   return out
 }
 
@@ -241,18 +275,33 @@ function deterministicBackfill(
   if (mondayDocContent?.trim()) {
     const sections = parseAllDocSections(mondayDocContent)
     const variantRows = parseVariantTableRows(mondayDocContent)
+    let variantsCountAdded = false
 
     // Build single "Briefing Content" body from all sections (canonical ALL CAPS labels).
     const parts: string[] = []
-    for (const { heading, content } of sections) {
-      if (!content.trim()) continue
+    for (let s = 0; s < sections.length; s++) {
+      const { heading } = sections[s]
+      // Skip non-brief headings (doc title, intro section titles, etc.).
+      if (!isKnownDocHeading(heading)) continue
+
+      let content = sections[s].content.trim()
+      // Monday docs sometimes emit bold one-liners as heading blocks right after a known heading.
+      // If known heading content is empty, fold one unknown heading+content into this section.
+      if (!content && s + 1 < sections.length && !isKnownDocHeading(sections[s + 1].heading)) {
+        const next = sections[s + 1]
+        content = [next.heading.trim(), next.content.trim()].filter(Boolean).join('\n').trim()
+        s += 1
+      }
+      if (!content) continue
+
       const label = getCanonicalLabel(heading)
       if (label === 'AUDIENCE/REGION') usedDocAudience = true
       // VARIANTS: keep count only in Briefing Content; detailed variant body lives in the dedicated variant blocks below.
       if (label === 'VARIANTS') {
         const variantCount = inferVariantCount(content, variantRows)
-        if (variantCount && Number.isFinite(variantCount) && variantCount > 0) {
+        if (!variantsCountAdded && variantCount && Number.isFinite(variantCount) && variantCount > 0) {
           parts.push(`VARIANTS: ${variantCount}`)
+          variantsCountAdded = true
         }
         continue
       } else {
@@ -388,13 +437,14 @@ export async function computeNodeMapping(
 TASK: Extract ALL sections and content from the Monday doc (marked with ## headings, - bullets, [x] checklists) and map them to the corresponding Figma template text nodes. The doc uses markdown-like structure where:
 - ## marks section headings (Idea, Why, Audience, Product, Visual, Copy info, etc.)
 - - marks bullet list items
-- [x] / [ ] mark checklist items
+- [x] / [ ] mark checklist items (only [x] checked items must appear in FORMATS)
 - Tables are formatted as | Variant | input visual | Script |
 
 CRITICAL RULES:
 1. Copy ALL text VERBATIM from the Monday doc. NEVER rewrite, paraphrase, summarize, or change any content. Every word must match the source exactly.
 2. Extract COMPLETE sections including ALL nested bullets and sub-items. If a section has 5 bullet points, include all 5.
 3. Reason through the doc structure step-by-step to ensure you capture every field.
+4. FORMATS section: Include ONLY checklist lines that are CHECKED ([x]) in the Monday doc. Preserve the full line text including aspect ratios (e.g. "video (9:16 + 4:5)"). Do not list unchecked formats.
 
 Variant block structure (use these exact sub-headers — they are the Monday column names):
 - First line: variant type (e.g. "A - Video") from the Variant column.

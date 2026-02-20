@@ -32,7 +32,7 @@ Only include entries for nodes you have data for; omit nodes with no source data
 | WHY: | Rationale | Monday Doc or columns |
 | AUDIENCE/REGION: | Audience or region | Column Region; keep label prefix, append value |
 | SEGMENT: ALL | Funnel/segment | Column Funnel; e.g. "SEGMENT: TOF" |
-| FORMATS: | Ad formats | Monday Doc or columns |
+| FORMATS: | Ad formats | Monday Doc or columns — **only checked checklist items** (see below) |
 | VARIANTS: 4 | Variant count | Monday Doc or infer from variants |
 | Product: | Product name | Monday Doc or columns |
 | Visual | Visual / messaging notes | Monday Doc — **value must be content-only (no "Visual:" prefix)** |
@@ -106,6 +106,16 @@ Item `name` is always the experiment name (Name EXP, and used in frame renames).
 
 ---
 
+## FORMATS section (checked items only)
+
+In Monday docs, the Formats section is often a **checklist**. Only **checked** items must appear in Figma.
+
+- In the Briefing Content body, the value for the FORMATS section must include **only the lines that are checked** in the Monday doc (e.g. only "video (9:16 + 4:5)" if that is the only box ticked).
+- Preserve the **full line text verbatim**, including aspect ratios (e.g. `video (9:16 + 4:5)`). Do not list unchecked formats.
+- Section labels (IDEA, WHY, FORMATS, etc.) are styled as bold in Figma when you use the canonical labels above; doc images are imported separately by the plugin.
+
+---
+
 ## Mapping conventions
 
 1. **Label prefix**: For nodes like "AUDIENCE/REGION:", "SEGMENT: ALL", "IDEA:", keep the label and append or replace with the value. Example: "AUDIENCE/REGION: " + "All" → "AUDIENCE/REGION: All". For "Name EXP", replace entirely with the experiment name. **Exception:** For "Visual" and "Copy info:", provide **content-only** values (no "Visual:" or "Copy info:" prefix); the label stays in its own node and the plugin writes the value into the Specs placeholder.
@@ -119,6 +129,7 @@ Item `name` is always the experiment name (Name EXP, and used in frame renames).
    - Do NOT put this input into the Copy column; Copy column Variation frames are for in-design copy only.
 4. **Whitespace**: Preserve single spaces after colons where the template uses them (e.g. "headline: " + value).
 5. **Node name exact match**: The plugin matches by `node.name`. Use the exact string from the template (e.g. "headline:", "subline:", "CTA:", "Note:").
+6. **FORMATS (checked only)**: In Briefing Content, under FORMATS:, output only the checklist lines that are **checked** in the Monday doc. Include the full line text including aspect ratios (e.g. "video (9:16 + 4:5)"). Omit unchecked lines.
 
 ---
 

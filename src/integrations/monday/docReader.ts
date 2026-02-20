@@ -249,9 +249,16 @@ export async function getDocContent(docId: string): Promise<string | null> {
       else if (blockType === 'bulleted list') {
         formatted = `- ${trimmed}`
       }
-      // Prefix check lists with [x] / [ ]
+      // Prefix check lists with [x] / [ ].
+      // Monday API returns content as a JSON *string* with a `checked` boolean field.
       else if (blockType === 'check list') {
-        const checked = typeof block.content === 'object' && block.content !== null && (block.content as Record<string, unknown>).checked === true
+        let checked = false
+        if (typeof block.content === 'string') {
+          const parsed = parseJsonObject(block.content)
+          if (parsed && parsed.checked === true) checked = true
+        } else if (typeof block.content === 'object' && block.content !== null) {
+          checked = (block.content as Record<string, unknown>).checked === true
+        }
         formatted = checked ? `[x] ${trimmed}` : `[ ] ${trimmed}`
       }
 
@@ -263,10 +270,54 @@ export async function getDocContent(docId: string): Promise<string | null> {
   }
 }
 
+/** Get string value from obj by key, trying exact and lowercase key match. */
+function getStringFromObj(obj: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    for (const [k, v] of Object.entries(obj)) {
+      if (
+        typeof v === 'string' &&
+        v.trim() &&
+        (k === key || k.toLowerCase() === key.toLowerCase())
+      ) {
+        return v
+      }
+    }
+  }
+  return null
+}
+
+/** Get string or number (as string) for asset/file id from obj. */
+function getAssetIdFromObj(obj: Record<string, unknown>): string | undefined {
+  const idKeys = ['assetId', 'asset_id', 'fileId', 'file_id']
+  const lowerIdKeys = new Set(idKeys.map((k) => k.toLowerCase()))
+  for (const [k, v] of Object.entries(obj)) {
+    if (!(idKeys.includes(k) || lowerIdKeys.has(k.toLowerCase()))) continue
+    if (typeof v === 'string' && v.trim()) return v
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  }
+  return undefined
+}
+
+/** Flatten block content to a single object; unwrap one level of nesting (e.g. content.data or content.image). */
+function normalizeImageContent(raw: unknown): Record<string, unknown> | null {
+  let obj: Record<string, unknown> | null = null
+  if (typeof raw === 'string') {
+    obj = parseJsonObject(raw)
+  } else if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    obj = raw as Record<string, unknown>
+  }
+  if (!obj) return null
+  // Unwrap one level if content is nested (e.g. { data: { src: "..." } } or { image: { url: "..." } })
+  const nested = obj.data ?? obj.content ?? obj.image ?? obj.file
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return { ...obj, ...(nested as Record<string, unknown>) }
+  }
+  return obj
+}
+
 /**
  * Extract image URLs from Monday Doc blocks.
- * Looks for blocks with type "image" and extracts their src/url from content.
- * Returns MondayImageAttachment[] for images found in the doc.
+ * Handles stringified or structured content; supports src, url, publicUrl/public_url, assetId/asset_id/fileId (any casing).
  */
 export async function getDocImages(docId: string): Promise<MondayImageAttachment[]> {
   if (!docId.trim()) return []
@@ -308,40 +359,20 @@ export async function getDocImages(docId: string): Promise<MondayImageAttachment
     }
 
     const images: MondayImageAttachment[] = []
+    let imageBlocksSeen = 0
     for (const block of allBlocks) {
       const blockType = (block.type ?? '').toLowerCase()
       if (blockType !== 'image' && blockType !== 'file') continue
+      imageBlocksSeen++
 
-      // Image block content may be JSON with src/url/fileId fields
-      let content: Record<string, unknown> | null = null
-      if (typeof block.content === 'string') {
-        content = parseJsonObject(block.content)
-      } else if (typeof block.content === 'object' && block.content !== null) {
-        content = block.content as Record<string, unknown>
-      }
+      const content = normalizeImageContent(block.content)
       if (!content) continue
 
-      // Try common URL fields in Monday Doc image blocks; capture assetId when present for fresh-URL resolution
       const url =
-        (typeof content.src === 'string' && content.src) ||
-        (typeof content.url === 'string' && content.url) ||
-        (typeof content.publicUrl === 'string' && content.publicUrl) ||
-        (typeof content.public_url === 'string' && content.public_url) ||
-        null
-      const assetId =
-        typeof content.assetId === 'string'
-          ? content.assetId
-          : typeof content.asset_id === 'string'
-            ? content.asset_id
-            : typeof content.fileId === 'number'
-              ? String(content.fileId)
-              : typeof content.fileId === 'string'
-                ? content.fileId
-                : undefined
+        getStringFromObj(content, 'src', 'url', 'publicUrl', 'public_url') ?? null
+      const assetId = getAssetIdFromObj(content)
       const name =
-        (typeof content.name === 'string' && content.name) ||
-        (typeof content.fileName === 'string' && content.fileName) ||
-        `doc-image-${block.id}`
+        getStringFromObj(content, 'name', 'fileName', 'file_name') ?? `doc-image-${block.id}`
 
       if (url || assetId) {
         images.push({
