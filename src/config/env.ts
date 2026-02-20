@@ -35,6 +35,12 @@ const envSchema = z.object({
   SUPABASE_SERVICE_KEY: z.string().min(1).optional(),
   /** Voyage AI key for evidence embeddings (1024-d). Used by ingestion script and server retrieval. */
   VOYAGE_API_KEY: z.string().min(1).optional(),
+  /** Babylon localization ingest endpoint for plugin wordcount runs. */
+  LOCALIZATION_BABYLON_INGEST_URL: z.string().url().optional(),
+  /** Shared HMAC secret for Heimdall -> Babylon ingest authentication. */
+  LOCALIZATION_BABYLON_SHARED_SECRET: z.string().min(1).optional(),
+  /** Optional key identifier header for key rotation support. */
+  LOCALIZATION_BABYLON_KEY_ID: z.string().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>
