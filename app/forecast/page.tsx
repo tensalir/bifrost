@@ -1,11 +1,29 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { TrendingUp, Upload, Loader2, Database, BarChart3, Users, Send, X } from 'lucide-react'
+import { useCallback, useEffect, useState, useRef } from 'react'
+import Link from 'next/link'
+import { TrendingUp, Upload, Loader2, Database, BarChart3, Users, Send, X, ArrowLeft, LayoutDashboard } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { csOutputToMinimalAssignments } from '@/src/domain/forecast/csToBriefingAssignments'
+import { FcHeaderBlock } from '@/components/forecast/FcHeaderBlock'
+import { FcAssetMixTable } from '@/components/forecast/FcAssetMixTable'
+import { FcChannelMixTable } from '@/components/forecast/FcChannelMixTable'
+import { FcFunnelTable } from '@/components/forecast/FcFunnelTable'
+import { FcAssetTypeTable } from '@/components/forecast/FcAssetTypeTable'
+import { FcUseCaseResultsTable } from '@/components/forecast/FcUseCaseResultsTable'
+import { FcAssetProductionTables } from '@/components/forecast/FcAssetProductionTables'
+import { CsContentBucketSummary } from '@/components/forecast/CsContentBucketSummary'
+import { CsStudioAgencyTable } from '@/components/forecast/CsStudioAgencyTable'
+import { CsFormatSummary } from '@/components/forecast/CsFormatSummary'
+import { CsBriefingTable, type CsDetailRow } from '@/components/forecast/CsBriefingTable'
+import { OverviewDashboard } from '@/components/forecast/OverviewDashboard'
+
+const STUDIO_AGENCY_OPTIONS = [
+  'Studio N', 'Studio L', '5pm', 'Studio N repurpose', 'Monks', 'Gain', 'Viscap', 'Loop Legends',
+  'Reiterations', 'Localisations', 'KH', 'Reactive', 'TOTAL',
+]
 
 interface ForecastRun {
   id: string
@@ -37,14 +55,41 @@ interface FcOutput {
   monthKey: string
   monthLabel: string
   totalAdsNeeded: number
+  headerBlock?: {
+    adspendTargetGlobal: number
+    adspendTargetExpansion: number
+    totalAdspendTarget: number
+    creativeBudgetPct: number
+    creativeBudgetGlobal: number
+    creativeBudgetExpansion: number
+    totalCreativeBudget: number
+    blendedCostPerAsset: number
+  }
   assetMix: Array<{
     bucket: string
     pctAttribution: number
     productionTarget: number
     forecasted: number
+    static?: number
+    carousel?: number
+    video?: number
+    ugc?: number
+    partnershipCode?: number
   }>
-  funnel: Array<{ stage: string; pctAttribution: number; productionTarget: number; forecasted: number }>
-  assetType: Array<{ assetType: string; pctAttribution: number; productionTarget: number; forecasted: number }>
+  channelMix?: Array<{ channel: string; pctAttribution: number; productionTarget: number }>
+  funnel: Array<{ stage: string; pctAttribution: number; productionTarget: number; forecasted?: number }>
+  assetType: Array<{ assetType: string; pctAttribution: number; productionTarget: number; forecasted?: number; csSheet?: number }>
+  useCaseResults?: Array<{
+    useCase: string
+    spend: number
+    revenue: number
+    roas: number
+    manualBoost: number
+    pctTotalSpend: number
+    adsProduction: number
+    expProduction: number
+    type: 'BAU' | 'EXP' | 'CAM'
+  }>
   totalProductionTarget: number
   totalForecasted: number
 }
@@ -60,6 +105,7 @@ interface CsOutput {
     csSheet: number
   }>
   studioAgencyTable: Array<{ studioAgency: string; numAssets: number }>
+  formatSummary?: { static: number; carousel: number; video: number; total: number; fcForecasted?: number }
 }
 
 export default function ForecastPage() {
@@ -70,6 +116,7 @@ export default function ForecastPage() {
   const [useCaseRows, setUseCaseRows] = useState<UseCaseRow[]>([])
   const [fc, setFc] = useState<FcOutput | null>(null)
   const [cs, setCs] = useState<CsOutput | null>(null)
+  const [csDetailRows, setCsDetailRows] = useState<CsDetailRow[]>([])
   const [loadingCompute, setLoadingCompute] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -88,6 +135,9 @@ export default function ForecastPage() {
     total: number
     summary: string
   } | null>(null)
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const parityFileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchRuns = useCallback(async () => {
     setLoadingRuns(true)
@@ -134,22 +184,58 @@ export default function ForecastPage() {
     if (!selectedRunId || !selectedMonthKey) {
       setFc(null)
       setCs(null)
+      setCsDetailRows([])
       return
     }
     setLoadingCompute(true)
     let cancelled = false
-    fetch(`/api/forecast/runs/${selectedRunId}/compute?monthKey=${encodeURIComponent(selectedMonthKey)}`)
-      .then((res) => res.json())
-      .then((data) => {
+    Promise.all([
+      fetch(`/api/forecast/runs/${selectedRunId}/compute?monthKey=${encodeURIComponent(selectedMonthKey)}`).then((res) => res.json()),
+      fetch(`/api/forecast/runs/${selectedRunId}/cs-detail-rows?monthKey=${encodeURIComponent(selectedMonthKey)}`).then((res) => res.json()),
+    ])
+      .then(([computeData, detailData]) => {
         if (cancelled) return
-        setFc(data.fc ?? null)
-        setCs(data.cs ?? null)
-        setParityStatus(data.fc ? 'Computed (parity check: run validator for full report)' : null)
+        setFc(computeData.fc ?? null)
+        setCs(computeData.cs ?? null)
+        setParityStatus(computeData.fc ? 'Computed (parity check: run validator for full report)' : null)
+        setCsDetailRows(Array.isArray(detailData.rows) ? detailData.rows : [])
       })
-      .catch(() => { if (!cancelled) setFc(null); setCs(null) })
+      .catch(() => { if (!cancelled) { setFc(null); setCs(null); setCsDetailRows([]) } })
       .finally(() => { if (!cancelled) setLoadingCompute(false) })
     return () => { cancelled = true }
   }, [selectedRunId, selectedMonthKey])
+
+  const refreshCompute = useCallback(async () => {
+    if (!selectedRunId || !selectedMonthKey) return
+    setLoadingCompute(true)
+    try {
+      const [computeRes, detailRes] = await Promise.all([
+        fetch(`/api/forecast/runs/${selectedRunId}/compute?monthKey=${encodeURIComponent(selectedMonthKey)}`),
+        fetch(`/api/forecast/runs/${selectedRunId}/cs-detail-rows?monthKey=${encodeURIComponent(selectedMonthKey)}`),
+      ])
+      const computeData = await computeRes.json()
+      const detailData = await detailRes.json()
+      setFc(computeData.fc ?? null)
+      setCs(computeData.cs ?? null)
+      setCsDetailRows(Array.isArray(detailData.rows) ? detailData.rows : [])
+    } catch {
+      setFc(null)
+      setCs(null)
+      setCsDetailRows([])
+    } finally {
+      setLoadingCompute(false)
+    }
+  }, [selectedRunId, selectedMonthKey])
+
+  const saveFcOverrides = useCallback(async (patch: { total_ads_needed?: number; creative_budget_pct?: number; use_case_boost_json?: Record<string, number> }) => {
+    if (!selectedRunId || !selectedMonthKey) return
+    const res = await fetch(`/api/forecast/runs/${selectedRunId}/fc-overrides`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ monthKey: selectedMonthKey, ...patch }),
+    })
+    if (res.ok) await refreshCompute()
+  }, [selectedRunId, selectedMonthKey, refreshCompute])
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -268,52 +354,52 @@ export default function ForecastPage() {
   }, [pushModalOpen])
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col min-h-screen">
+      <header className="shrink-0 border-b border-border bg-card px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-semibold">Heimdall</h1>
+        <Link
+          href="/admin"
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Admin
+        </Link>
+      </header>
+      <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
           <TrendingUp className="h-7 w-7" />
           Forecast
-        </h1>
+        </h2>
         <p className="text-sm text-muted-foreground">
-          Upload Use Case Data from Excel, then view FC and CS outputs with parity indicators.
+          View and edit FC/CS forecast. Data is seeded from the workbook; use parity check below to compare with Excel.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
-        <label className="cursor-pointer">
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleUpload}
-            disabled={uploading}
-          />
-          <Button type="button" variant="outline" asChild>
-            <span>
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
-              Upload workbook
-            </span>
-          </Button>
-        </label>
-        {uploadError && (
-          <p className="text-sm text-destructive">{uploadError}</p>
-        )}
         {loadingRuns ? (
           <span className="text-sm text-muted-foreground flex items-center gap-1"><Loader2 className="h-4 w-4 animate-spin" /> Loading runs…</span>
+        ) : runs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No runs yet. Use &quot;Import workbook&quot; below to seed from Excel.</p>
         ) : (
           <>
-            <label className="text-sm text-muted-foreground">Run:</label>
-            <select
-              value={selectedRunId ?? ''}
-              onChange={(e) => { setSelectedRunId(e.target.value || null); const r = runs.find(x => x.id === e.target.value); if (r?.month_keys?.length) setSelectedMonthKey(r.month_keys[0]); }}
-              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm min-w-[200px]"
-            >
-              <option value="">Select a run</option>
-              {runs.map((r) => (
-                <option key={r.id} value={r.id}>{r.name ?? r.workbook_filename ?? r.id.slice(0, 8)}</option>
-              ))}
-            </select>
-            {monthKeys.length > 0 && (
+            {runs.length > 1 && (
+              <>
+                <label className="text-sm text-muted-foreground">Run:</label>
+                <select
+                  value={selectedRunId ?? ''}
+                  onChange={(e) => { setSelectedRunId(e.target.value || null); const r = runs.find(x => x.id === e.target.value); if (r?.month_keys?.length) setSelectedMonthKey(r.month_keys[0]); }}
+                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm min-w-[200px]"
+                >
+                  <option value="">Select a run</option>
+                  {runs.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name ?? r.workbook_filename ?? r.id.slice(0, 8)}</option>
+                  ))}
+                </select>
+              </>
+            )}
+            {selectedRunId && monthKeys.length > 0 && (
               <>
                 <label className="text-sm text-muted-foreground">Month:</label>
                 <select
@@ -331,45 +417,84 @@ export default function ForecastPage() {
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2">
-        <p className="text-sm text-muted-foreground">{parityStatus ?? 'Upload the same workbook and run parity check to compare engine vs Excel.'}</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="cursor-pointer text-sm">
+      <details className="rounded-lg border border-border bg-muted/30 overflow-hidden group">
+        <summary className="px-4 py-3 cursor-pointer list-none font-medium text-sm flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <span className="transition group-open:rotate-90">▸</span>
+          Parity check (compare with Excel workbook)
+        </summary>
+        <div className="px-4 pb-4 pt-0 space-y-2 border-t border-border/50">
+          <p className="text-sm text-muted-foreground">{parityStatus ?? 'Select a workbook and month, then run the check to compare engine output vs Excel.'}</p>
+          <div className="flex flex-wrap items-center gap-2">
             <input
+              ref={parityFileInputRef}
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
               onChange={(e) => setParityFile(e.target.files?.[0] ?? null)}
             />
-            <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-muted/50">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => parityFileInputRef.current?.click()}
+              className="text-sm"
+            >
               {parityFile ? parityFile.name : 'Select workbook'}
-            </span>
-          </label>
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={runParityCheck}
+              disabled={!parityFile || !selectedMonthKey || parityChecking}
+            >
+              {parityChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              <span className="ml-1">Run parity check</span>
+            </Button>
+          </div>
+          {parityReport && (
+            <div className="text-sm pt-2 border-t border-border/50">
+              <p className="font-medium">{parityReport.summary}</p>
+              {parityReport.mismatches.length > 0 && (
+                <ul className="mt-2 space-y-1 text-muted-foreground">
+                  {parityReport.mismatches.slice(0, 10).map((m, i) => (
+                    <li key={i}>{m.sheet} {m.cell}: expected {String(m.expected)}, actual {String(m.actual)}{m.delta != null ? ` (Δ ${m.delta})` : ''}</li>
+                  ))}
+                  {parityReport.mismatches.length > 10 && <li>… and {parityReport.mismatches.length - 10} more</li>}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-border bg-muted/20 overflow-hidden group">
+        <summary className="px-4 py-2 cursor-pointer list-none text-sm text-muted-foreground flex items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <span className="transition group-open:rotate-90">▸</span>
+          Import workbook (one-time seed)
+        </summary>
+        <div className="px-4 pb-4 pt-0 flex flex-wrap items-center gap-2 border-t border-border/50">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleUpload}
+            disabled={uploading}
+          />
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
             size="sm"
-            onClick={runParityCheck}
-            disabled={!parityFile || !selectedMonthKey || parityChecking}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
           >
-            {parityChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            <span className="ml-1">Run parity check</span>
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+            Upload workbook
           </Button>
+          {uploadError && <p className="text-sm text-destructive">{uploadError}</p>}
         </div>
-        {parityReport && (
-          <div className="text-sm pt-2 border-t border-border/50">
-            <p className="font-medium">{parityReport.summary}</p>
-            {parityReport.mismatches.length > 0 && (
-              <ul className="mt-2 space-y-1 text-muted-foreground">
-                {parityReport.mismatches.slice(0, 10).map((m, i) => (
-                  <li key={i}>{m.sheet} {m.cell}: expected {String(m.expected)}, actual {String(m.actual)}{m.delta != null ? ` (Δ ${m.delta})` : ''}</li>
-                ))}
-                {parityReport.mismatches.length > 10 && <li>… and {parityReport.mismatches.length - 10} more</li>}
-              </ul>
-            )}
-          </div>
-        )}
-      </div>
+      </details>
 
       <Tabs defaultValue="useCase" className="w-full">
         <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
@@ -384,6 +509,10 @@ export default function ForecastPage() {
           <TabsTrigger value="cs" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent">
             <Users className="h-4 w-4 mr-2" />
             CS
+          </TabsTrigger>
+          <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent">
+            <LayoutDashboard className="h-4 w-4 mr-2" />
+            Overview
           </TabsTrigger>
         </TabsList>
         <TabsContent value="useCase" className="mt-4">
@@ -435,71 +564,59 @@ export default function ForecastPage() {
                 <h3 className="font-semibold mb-2">Summary</h3>
                 <p className="text-sm">Month: {fc.monthLabel} · Total ads needed: <strong>{fc.totalAdsNeeded}</strong> · Production target: {fc.totalProductionTarget} · Forecasted: {fc.totalForecasted}</p>
               </div>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <h3 className="p-2 font-semibold bg-muted/50">Asset Mix</h3>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30">
-                    <tr>
-                      <th className="text-left p-2">Bucket</th>
-                      <th className="text-right p-2">%</th>
-                      <th className="text-right p-2">Production Target</th>
-                      <th className="text-right p-2">Forecasted</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fc.assetMix.map((row) => (
-                      <tr key={row.bucket} className="border-t border-border/50">
-                        <td className="p-2">{row.bucket}</td>
-                        <td className="p-2 text-right">{(row.pctAttribution * 100).toFixed(0)}%</td>
-                        <td className="p-2 text-right">{row.productionTarget}</td>
-                        <td className="p-2 text-right">{row.forecasted}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <h3 className="p-2 font-semibold bg-muted/50">Funnel</h3>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30">
-                    <tr>
-                      <th className="text-left p-2">Stage</th>
-                      <th className="text-right p-2">%</th>
-                      <th className="text-right p-2">Production Target</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fc.funnel.map((row) => (
-                      <tr key={row.stage} className="border-t border-border/50">
-                        <td className="p-2">{row.stage}</td>
-                        <td className="p-2 text-right">{(row.pctAttribution * 100).toFixed(0)}%</td>
-                        <td className="p-2 text-right">{row.productionTarget}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <h3 className="p-2 font-semibold bg-muted/50">Asset Type</h3>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30">
-                    <tr>
-                      <th className="text-left p-2">Type</th>
-                      <th className="text-right p-2">%</th>
-                      <th className="text-right p-2">Production Target</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fc.assetType.map((row) => (
-                      <tr key={row.assetType} className="border-t border-border/50">
-                        <td className="p-2">{row.assetType}</td>
-                        <td className="p-2 text-right">{(row.pctAttribution * 100).toFixed(0)}%</td>
-                        <td className="p-2 text-right">{row.productionTarget}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {fc.headerBlock && (
+                <FcHeaderBlock
+                  totalAdsNeeded={fc.totalAdsNeeded}
+                  headerBlock={fc.headerBlock}
+                  onTotalAdsChange={(v) => saveFcOverrides({ total_ads_needed: v })}
+                  onCreativeBudgetPctChange={(v) => saveFcOverrides({ creative_budget_pct: v })}
+                />
+              )}
+              <FcAssetMixTable
+                assetMix={fc.assetMix.map((r) => ({
+                  bucket: r.bucket,
+                  pctAttribution: r.pctAttribution,
+                  productionTarget: r.productionTarget,
+                  forecasted: r.forecasted,
+                  static: r.static ?? 0,
+                  carousel: r.carousel ?? 0,
+                  video: r.video ?? 0,
+                  ugc: r.ugc ?? 0,
+                  partnershipCode: r.partnershipCode ?? 0,
+                }))}
+              />
+              {fc.channelMix && fc.channelMix.length > 0 && (
+                <FcChannelMixTable channelMix={fc.channelMix} />
+              )}
+              <FcFunnelTable
+                funnel={fc.funnel.map((r) => ({
+                  stage: r.stage,
+                  pctAttribution: r.pctAttribution,
+                  productionTarget: r.productionTarget,
+                  forecasted: r.forecasted ?? 0,
+                }))}
+              />
+              <FcAssetTypeTable
+                assetType={fc.assetType.map((r) => ({
+                  assetType: r.assetType,
+                  pctAttribution: r.pctAttribution,
+                  productionTarget: r.productionTarget,
+                  forecasted: r.forecasted ?? 0,
+                  csSheet: r.csSheet ?? 0,
+                }))}
+              />
+              {fc.useCaseResults && fc.useCaseResults.length > 0 && (
+                <FcUseCaseResultsTable
+                  rows={fc.useCaseResults}
+                  onBoostChange={(useCase, value) => {
+                    const next: Record<string, number> = {}
+                    fc.useCaseResults?.forEach((row) => { next[row.useCase] = row.manualBoost })
+                    next[useCase] = value
+                    saveFcOverrides({ use_case_boost_json: next })
+                  }}
+                />
+              )}
+              <FcAssetProductionTables />
             </div>
           )}
           {!fc && !loadingCompute && selectedRunId && selectedMonthKey && (
@@ -527,52 +644,33 @@ export default function ForecastPage() {
                   Push to Briefings
                 </Button>
               </div>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <h3 className="p-2 font-semibold bg-muted/50">Content Bucket</h3>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30">
-                    <tr>
-                      <th className="text-left p-2">Bucket</th>
-                      <th className="text-right p-2">Production (UGC excl.)</th>
-                      <th className="text-right p-2">Forecasted</th>
-                      <th className="text-right p-2">CS Sheet</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cs.contentBucketSummary.map((row) => (
-                      <tr key={row.bucket} className="border-t border-border/50">
-                        <td className="p-2">{row.bucket}</td>
-                        <td className="p-2 text-right">{row.productionTargetUgcExcluded}</td>
-                        <td className="p-2 text-right">{row.forecastedUgcExcluded}</td>
-                        <td className="p-2 text-right">{row.csSheet}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="rounded-lg border border-border overflow-hidden">
-                <h3 className="p-2 font-semibold bg-muted/50">Studio / Agency</h3>
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/30">
-                    <tr>
-                      <th className="text-left p-2">Studio / Agency</th>
-                      <th className="text-right p-2"># Assets</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cs.studioAgencyTable.map((row) => (
-                      <tr key={row.studioAgency} className="border-t border-border/50">
-                        <td className="p-2">{row.studioAgency}</td>
-                        <td className="p-2 text-right">{row.numAssets}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <CsContentBucketSummary rows={cs.contentBucketSummary} />
+              <CsStudioAgencyTable rows={cs.studioAgencyTable} />
+              {cs.formatSummary && <CsFormatSummary formatSummary={cs.formatSummary} />}
+              {selectedRunId && selectedMonthKey && (
+                <CsBriefingTable
+                  runId={selectedRunId}
+                  monthKey={selectedMonthKey}
+                  rows={csDetailRows}
+                  onRefresh={refreshCompute}
+                  contentBucketOptions={cs.contentBucketSummary.map((r) => r.bucket).filter(Boolean)}
+                  studioAgencyOptions={STUDIO_AGENCY_OPTIONS}
+                  briefOwnerOptions={Array.from(new Set(csDetailRows.map((r) => r.briefOwner).filter(Boolean)))}
+                  useCaseOptions={Array.from(new Set(useCaseRows.map((r) => r.use_case).filter(Boolean)))}
+                />
+              )}
             </div>
           )}
           {!cs && !loadingCompute && selectedRunId && selectedMonthKey && (
             <p className="text-sm text-muted-foreground">No CS data. Select a run and month.</p>
+          )}
+        </TabsContent>
+        <TabsContent value="overview" className="mt-4">
+          {selectedRunId && (
+            <OverviewDashboard runId={selectedRunId} monthKeys={monthKeys} />
+          )}
+          {!selectedRunId && (
+            <p className="text-sm text-muted-foreground py-8">Select a run to see the overview.</p>
           )}
         </TabsContent>
       </Tabs>
@@ -635,6 +733,8 @@ export default function ForecastPage() {
           </div>
         </div>
       )}
+        </div>
+      </main>
     </div>
   )
 }

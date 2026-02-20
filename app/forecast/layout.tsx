@@ -1,16 +1,15 @@
-import { Nav } from '@/components/nav'
-
+/**
+ * Forecast layout — full-screen, no sidebar.
+ * Forecast is a standalone module with its own top-bar header.
+ */
 export default function ForecastLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-screen">
-      <Nav />
-      <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-        <div className="mx-auto max-w-7xl">{children}</div>
-      </main>
+    <div className="min-h-screen bg-background">
+      {children}
     </div>
   )
 }

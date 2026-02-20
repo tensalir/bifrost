@@ -33,7 +33,7 @@ const sections: NavSection[] = [
       { name: 'Heimdall Plugin', href: '/admin/plugin', icon: Puzzle },
       { name: 'Feedback Summarizer', href: '/sheets', icon: MessageSquare },
       { name: 'Briefing Assistant', href: '/briefing-assistant', icon: LayoutGrid },
-      { name: 'Forecast', href: '/forecast', icon: TrendingUp },
+      { name: 'Forecast', href: '/forecast', icon: TrendingUp, external: true },
     ],
   },
   {

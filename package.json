@@ -9,6 +9,7 @@
     "dev:backend": "tsx watch src/cli.ts",
     "start": "next start -p 3846",
     "queue": "tsx src/scripts/test-e2e.ts",
+    "seed:forecast": "tsx scripts/seed-forecast-v3.ts",
     "lint": "eslint src --ext .ts",
     "test:domain": "tsx src/domain/briefingAssistant/datasources.test.ts && tsx src/domain/briefingAssistant/evidence/metaCsvTransform.test.ts",
     "test:split": "tsx src/domain/briefingAssistant/splitEngine.test.ts",

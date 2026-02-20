@@ -37,9 +37,15 @@ export interface ForecastFcOverride {
   run_id: string
   month_key: string
   total_ads_needed: number | null
-  asset_mix_json: Record<string, unknown> | null
-  funnel_json: Record<string, unknown> | null
-  asset_type_json: Record<string, unknown> | null
+  adspend_target_global: number | null
+  adspend_target_expansion: number | null
+  creative_budget_pct: number | null
+  channel_mix_json: Record<string, number> | Array<{ channel: string; pct: number }> | null
+  use_case_boost_json: Record<string, number> | null
+  asset_mix_json: Record<string, unknown> | Array<{ bucket: string; pct: number }> | null
+  funnel_json: Record<string, unknown> | Array<{ stage: string; pct: number }> | null
+  asset_type_json: Record<string, unknown> | Array<{ assetType: string; pct: number }> | null
+  asset_production_json: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
